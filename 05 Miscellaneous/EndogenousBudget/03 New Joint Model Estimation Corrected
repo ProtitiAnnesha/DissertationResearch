@@ -1,0 +1,498 @@
+//Protiti Annesha, Spring, 2016
+
+new;
+library maxlik;
+maxset;
+
+/*****************************************************************************
+                  Global Variable Definitions
+*****************************************************************************/
+clearg __row,nobs,_config,_alp0to1,_price,nc,datatset,_po,nvarm,nvardel,nvargam; //clears global symbols by setting them eqaul to sero
+clearg outgd_err, repn, b_mdcev, sigma_u_global;
+
+//__row    = 100;     // Number of rows to be read at a time by the log-likelihood function
+nobs     = 6218;    // Number of observations in the dataset
+numout 	 = 1;
+_config  = 4;       // Utility specification configuration, possible values: 1,4,7
+                    // see the documentation for an explanation of each configuration
+_alp0to1 = 1;       // 1 if you want the Alpha values to be constrained between 0 and 1, 0 otherwise
+                    // putting _alp0to1 = 1 is recommended practice and can provide estimation stability
+_price   = 0;       // 1 if there is price variation across goods, 0 otherwise
+nc       = 9;       // Number of alternatives (in the universal choice set) 
+repn     = 100;		// How many draws to use
+
+dataset  = "MDCEVTimeuse_DrPinjari_3.dat";
+dtamat = loadd(dataset);
+
+//print "rows and cols of dtamat: " rows(dtamat)  cols(dtamat); 
+
+haltset = "haltbrat_jointsft_6218obs_200rep.dat";
+haltmat = loadd(haltset); // These are uniform draws
+
+@Draw the half normals@
+haltmat = haltmat[11:rows(haltmat),.];  // print "rows(haltmat): " rows(haltmat);
+
+@Generate half normal from halton uniform draws@
+err_halt = hnormHalt(rows(dtamat), 200);  @This is also sorted as nobs sized vector repeated repn times@
+outgd_err = err_halt[1:rows(dtamat)*repn,.];  //print "rows(outgd_err): " rows(outgd_err);
+@ end of drawing half normal @
+
+//print "rows and cols of haltmat: " rows(haltmat) cols(haltmat);
+
+//{ halterrP,halterr } = indices(haltset,"errHlt"); // position of pointer to case number in data set,
+
+{ pointer,_po } = indices(dataset,"caseid"); // position of pointer to case number in data set, 
+
+
+/*****************************************************************************
+                    Variable Specification Area
+*****************************************************************************/
+
+{ unov,ivuno } = indices(dataset,"uno");
+
+
+{ serov,ivsero } = indices(dataset,"sero");
+
+
+//{ weight,wtind } = indices(dataset,"uno");
+
+
+{ choicm,f } = indices(dataset,"uno"|"shpn_dur"|"oman_dur"|"socn_dur"|"gymn_dur"|"medn_dur"|"meln_dur"|"pcdn_dur"|"othn_dur");   // Allocation to outside good is not used, but it has to be greater than sero
+
+
+{ cprice,fp } = indices(dataset,"uno"|"uno"|"uno"|"uno"|"uno"|"uno"|"uno"|"uno"|"uno");
+
+
+/* Definition of INDEPENDENT variables */
+let	ivm1	=	{	sero	sero	sero	sero	sero	sero	sero	sero	};//sero	  sero	 sero   sero    sero	sero	 sero	sero    sero    sero	    sero   	sero  sero   sero   sero	sero    sero    sero   sero    sero    sero     sero   sero    sero    sero   sero    sero   sero    sero    sero     sero        sero    sero     sero    sero    sero    sero        sero       };																				
+let	ivm2	=	{	uno	    sero	sero	sero	sero	sero	sero	sero	};//female	  sero	 sero   sero    sero	sero     sero	sero    sero    sero	    sero 	sero  sero   sero   chd05	sero    sero    sero   sero    sero    sero     sero   sero    sero   WKCUNT  sero    sero   sero    sero    sero     sero        sero    sero     sero    sero    sero    drv         sero       };																					
+let	ivm3	=	{	sero	uno	    sero	sero	sero	sero	sero	sero	};//sero	  sero	 sero   sero    sero	sero	 sero	sero    sero    sero	    sero   	sero  sero   sero   sero	chd05   sero    sero   sero    sero    sero     sero   sero    sero    sero   sero    somcol bachigh sero    sero     sero        sero    sero     sero    sero    sero    drv         sero       };																				
+let	ivm4	=	{	sero	sero	uno	    sero	sero	sero	sero	sero	};//sero	  sero	 sero  ag1829   sero	sero	 sero	sero   ag75g84  sero	    sero   	sero  bous   sero   sero	sero    sero    sero   incg25  sero    sero     sero   sero    sero    sero   sero    sero   sero    sero    to_emn_o Rec_acc     sero    sero     sero    monday  friday  drv         sero       };																				
+let	ivm5	=	{	sero	sero	sero	uno	    sero	sero	sero	sero	};//sero	  female sero	sero    sero	sero	 sero	sero    sero    sero	    sero   	sero  sero   sero	sero    sero    sero    sero   sero    sero    inc5175  sero   incg75  sero    sero   sero    sero   sero   bachigh  sero     sero        Rec_acc  cul_q   sero    sero    sero    drv         sero       };																				
+let	ivm6	=	{	sero	sero	sero	sero	uno	    sero	sero	sero	};//sero	  sero	 sero	sero    ag5564	sero	 ag6574	sero    sero  ag75g84	    sero   	sero  sero   sero   sero	sero    sero    sero   sero    sero    sero     sero   sero    sero    sero   sero    sero   sero    sero    sero     sero        sero    sero     sero    sero    sero    drv         sero       };																			
+let	ivm7	=	{	sero	sero	sero	sero	sero	uno	    sero	sero	};//sero	  sero	 sero	sero    sero	sero	 sero	sero    sero    sero	    sero   	white sero   bous   sero	sero    sero    sero   sero    inc2550 sero   inc5175  sero    incg75  sero   sero    sero   sero    sero    sero     sero        sero    sero     monday  sero    sero    drv         sero       }; 																			
+let	ivm8	=	{	sero	sero	sero	sero	sero	sero	uno	    sero	};//sero	  sero	 female	sero    sero	ag5564	 sero	ag6574  sero    sero	    ag75g84 sero  sero   sero   sero	sero   chd05    chd615 sero    sero    sero     sero   sero    sero    sero   WKCUNT   sero  sero    sero    sero     sero        sero    sero     sero    sero    sero    drv         drv        };																				
+let	ivm9	=	{	sero	sero	sero	sero	sero	sero	sero	uno	    };//sero      sero	 sero	sero    sero	sero	 sero	sero    sero    sero	    sero   	sero  sero   sero   sero	sero    sero    sero   sero    sero    sero     sero   sero    sero    sero   sero    sero   sero    sero    sero     sero        sero    sero     sero    sero    sero    drv         sero       };																			
+
+
+{ v1,ivmt1 }   = indices(dataset,ivm1');
+{ v2,ivmt2 }   = indices(dataset,ivm2');
+{ v3,ivmt3 }   = indices(dataset,ivm3');
+{ v4,ivmt4 }   = indices(dataset,ivm4');
+{ v5,ivmt5 }   = indices(dataset,ivm5');
+{ v6,ivmt6 } = indices(dataset,ivm6');
+{ v7,ivmt7 } = indices(dataset,ivm7');
+{ v8,ivmt8 } = indices(dataset,ivm8');
+{ v9,ivmt9 } = indices(dataset,ivm9');
+
+
+varnam = "ASC-psi2"|"ASC-psi3"|"ASC-psi4"|"ASC-psi5"|"ASC-psi6"|"ASC-psi7"|"ASC-psi8"|"ASC-psi9";//|"femal_2"|"femal_5"|"femal_8"|"ag1829_4"|"ag5564_6"|"ag5564_8"|"ag6574_6"|"ag6574_8"|"agg85_4"|"agg85_6"|"agg85_8"|"whit_7"|"bus_4"|"bus_7"|"chd5_2"|"chd5_3"|"chd5_8"|"chd615_8"|"incg25_4"|"inc25_7"|"in575_5"|"in575_7"|"ing75_5"|"ing75_7"|"wkcnt_2"|"wkcnt_8"|"somcol_3"|"bachi_3"|"bachi_5"|"tom_o_4"|"recac_4"|"recac_5"|"cul_q_5"|"mon_7"|"mon_4"|"fri_4"|"drv_b"|"drv_8"; 																					
+
+
+let ivd1 = { uno    sero    sero    sero    sero    sero    sero    sero    sero      };
+let ivd2 = { sero   uno     sero    sero    sero    sero    sero    sero    sero      };
+let ivd3 = { sero   sero    uno     sero    sero    sero    sero    sero    sero      };
+let ivd4 = { sero   sero    sero    uno     sero    sero    sero    sero    sero      };
+let ivd5 = { sero   sero    sero    sero    uno     sero    sero    sero    sero      };
+let ivd6 = { sero   sero    sero    sero    sero    uno     sero    sero    sero      };
+let ivd7 = { sero   sero    sero    sero    sero    sero    uno     sero    sero      };
+let ivd8 = { sero   sero    sero    sero    sero    sero    sero    uno     sero      };
+let ivd9 = { sero   sero    sero    sero    sero    sero    sero    sero    uno       };
+
+
+{ w1,ivdt1 }   = indices(dataset,ivd1');
+{ w2,ivdt2 }   = indices(dataset,ivd2');
+{ w3,ivdt3 }   = indices(dataset,ivd3');
+{ w4,ivdt4 }   = indices(dataset,ivd4');
+{ w5,ivdt5 }   = indices(dataset,ivd5');
+{ w6,ivdt6 } = indices(dataset,ivd6');
+{ w7,ivdt7 } = indices(dataset,ivd7');
+{ w8,ivdt8 } = indices(dataset,ivd8');
+{ w9,ivdt9 } = indices(dataset,ivd9');
+
+
+let ivg1 = { uno    sero    sero    sero    sero    sero    sero    sero    sero     };//sero     sero    sero      sero       sero      sero    sero      sero      sero      sero      };												
+let ivg2 = { sero   uno     sero    sero    sero    sero    sero    sero    sero     };//female   sero    sero      sero       sero      sero    sero      sero      sero      sero      };												
+let ivg3 = { sero   sero    uno     sero    sero    sero    sero    sero    sero     };//sero     sero    sero      sero       sero      sero    sero      sero      sero      sero      };												
+let ivg4 = { sero   sero    sero    uno     sero    sero    sero    sero    sero     };//sero     sero    ag3054    sero       sero      sero    friday    sero      Rec_acc   sero      };												
+let ivg5 = { sero   sero    sero    sero    uno     sero    sero    sero    sero     };//sero     female  sero      somcol     bachigh   sero    sero      sero      sero      Rec_acc   };												
+let ivg6 = { sero   sero    sero    sero    sero    uno     sero    sero    sero     };//sero     sero    sero      sero       sero      sero    sero      sero      sero      sero      };												
+let ivg7 = { sero   sero    sero    sero    sero    sero    uno     sero    sero     };//sero     sero    sero      sero       sero     monday   sero      friday    sero      sero      };												
+let ivg8 = { sero   sero    sero    sero    sero    sero    sero    uno     sero     };//sero     sero    sero      sero       sero      sero    sero      sero      sero      sero      };												
+let ivg9 = { sero   sero    sero    sero    sero    sero    sero    sero    uno      };//sero     sero    sero      sero       sero      sero    sero      sero      sero      sero      }; 
+
+
+{ u1,ivgt1 }   = indices(dataset,ivg1');
+{ u2,ivgt2 }   = indices(dataset,ivg2');
+{ u3,ivgt3 }   = indices(dataset,ivg3');
+{ u4,ivgt4 }   = indices(dataset,ivg4');
+{ u5,ivgt5 }   = indices(dataset,ivg5');
+{ u6,ivgt6 } = indices(dataset,ivg6');
+{ u7,ivgt7 } = indices(dataset,ivg7');
+{ u8,ivgt8 } = indices(dataset,ivg8');
+{ u9,ivgt9 } = indices(dataset,ivg9');
+
+
+@Define the independent variables for the budget equation@
+let ivr1 = { uno female	ag1829	agg75  black  drv  int_use  sinhh  lowinc  incg75  zework  urb  monday };
+
+{ vr1,ivrt1 } = indices(dataset,ivr1'); 
+
+
+ivm = ivmt1'~ivmt2'~ivmt3'~ivmt4'~ivmt5'~ivmt6'~ivmt7'~ivmt8'~ivmt9'; // can append more: e.g. ~ivmt4'~ivmt5' and so on, based on the number of alternatives
+ivd = ivdt1'~ivdt2'~ivdt3'~ivdt4'~ivdt5'~ivdt6'~ivdt7'~ivdt8'~ivdt9'; // can append more: e.g. ~ivdt4'~ivdt5' and so on, based on the number of alternatives
+ivg = ivgt1'~ivgt2'~ivgt3'~ivgt4'~ivgt5'~ivgt6'~ivgt7'~ivgt8'~ivgt9'; // can append more: e.g. ~ivgt4'~ivgt5' and so on, based on the number of alternatives
+ivr = ivrt1';
+
+
+nvarm = cols(ivm1);     // number of variables in baseline utility   = number of columns in ivm1, do not modify this
+nvardel = cols(ivd1);   // number of variables in satiation          = number of columns in ivd1, do not modify this
+nvargam = cols(ivg1);   // number of variables in translation        = number of columns in ivg1, do not modify this
+nvarb = cols(ivr1);		// number of parameters in the budget equation
+
+// Associating columns with variable names
+flagchm = f';
+flagavm = ivuno~ivuno~ivuno~ivuno~ivuno~ivuno~ivuno~ivuno~ivuno;//Append as many "ivuno" as the number of alternatives 
+                            //(all alternatives are considered to be available; if an alternative is not available, use ivsero for that alternative).
+flagprcm = fp';
+
+
+/*********Define budget parameters***********************************/
+b_sft = 5.7034|	0.084|	0.1153|	-0.0826|	0.1019|	0.1118|	0.0676|	0.0904|	-0.0796|	0.0532|	0.0567|	0.043|	-0.0936;
+//b_sft = zeros(nvarb,1);
+b_sft = b_sft|sqrt(0.2847)|sqrt(1.7173);
+
+//sigma_u_global = sqrt(b_sft[nvarb+2];  // starting value to run the sft model
+
+
+varnamb = "Cons"|"Female"|"YngAge"|"OldAge"|"Black"|
+		  "Driver"|"Int_Use"|"SingPer"|"LowInc"|"HighInc"|
+		  "ZWork"|"Urban"|"Monday"|"sigma_v"|"sigma_u";
+
+
+/* Do not modify the line below */
+
+hh = zeros(1,numout)~ones(1,nc-numout);
+
+/******************************************************************************
+                          Starting values
+******************************************************************************/
+
+ if _config==1;
+   EQMATDEL = eye(nvardel);//Identity matrix, since want to estimate three alpha
+   EQMATGAM = ones(1,nc); //All gamma are restricted to one, so one row and three column
+   b = zeros(nvarm,1)|zeros(rows(EQMATDEL),1)|zeros(rows(EQMATGAM),1);//Specifying starting value for configuration 1
+   _max_active = ones(nvarm+rows(eqmatdel),1)|zeros(rows(eqmatgam),1);//Specifying which parameter to estimate and which one to fix to sero
+ elseif _config==4;
+   EQMATDEL = ones(1,nc);
+   EQMATGAM = eye(nvargam);
+   b_mdcev = { -1.863	-2.5145	-2.7772	-3.1458	-3.0355	-2.8664	-3.4089	-4.5614	
+				3.2144	3.1656	4.9092	2.0921	3.4936	3.2692	1.5156	2.3489
+			};
+	b_mdcev = b_mdcev'; // Only supplying the parameters that would be estimated
+ elseif _config==7;
+   EQMATDEL = ones(1,nc);
+   EQMATGAM = eye(nc);
+   b = zeros(nvarm,1)|-1000*ones(rows(EQMATDEL),1)|zeros(rows(EQMATGAM),1); //Why fixing alpha to -1000?
+   _max_active = ones(nvarm,1)|zeros(rows(eqmatdel),1)|zeros(rows(eqmatgam),1);
+ endif;
+
+
+/* Defining variable labels in satiation and translation parameter terms for output printing */
+
+  varndell = 0 $+ "D" $+ ftocv(seqa(1,1,rows(eqmatdel)),2,0);//seqa(start, increment, total_number)
+  varngam = 0 $+ "G" $+ ftocv(seqa(1,1,rows(eqmatgam)),2,0);//ftocv(numeric to be converted, minimum filed, decimal point prec)
+															//0 $+ = force the type to be a matrix, result: D01, D02, D03
+
+
+/* Other Maxlik globals */
+_max_Options = { bfgs stepbt };
+_max_CovPar = 2;        // modify according to the type of standard errors you need
+//_max_GradCheckTol = 1e-6;
+_max_GradTol = 5e-5; 
+_max_Maxiters = 1000;  
+
+/******************************************************************************/
+@THIS IS THE OF THE CODE, WHERE YOU MAKE THE CALL TO THE APPROPRIATE LIKELIHOOD FUNCTION USING APPROPRIATE PARAMETER@
+/*****************************************************************************/
+
+ //call lprJoint(b_sft,dtamat);
+ 
+ { x_sft,f_sft,g_sft,cov_sft,retcode_sft } = maxprt(maxlik(dtamat,0,&lprJoint,b_sft));
+	
+
+
+/**************************START MAIN FUNCTION****************************************/
+/**************************************************************************************/
+
+
+@Changed slightly to accommodate estimating all the parameters that are supplied@
+proc lprMdcev(x,dta);
+	local e1,popass,p0,xdel,xgam,v2,w2,u2,j,v,w,u,a,b,m,c,xsig,ylarge1,ylarge2,fin,as,ass,r,err,ylarge,
+          xsigm,vv,vlos,e,ut,p1,p2,p3,z,w1,z1,d,f,wt, xbase;
+	local T, outgd0, outgd, np, vOut, p00;  
+		  
+ e1 = rows(dta); 	//print "e1: " e1;	
+ popass = dta[.,_po]; 
+ xbase  =  x[1:nvarm]; 		//print "xbase: " xbase';
+ xdel = eqmatdel'*(-1000); 	@Not provided as a parameter@	//print "xdel: " xdel';  
+ xgam = eqmatgam'*((-1000*ones(numout,1))|x[nvarm+1:rows(x)]); 	//print "xgam: " xgam';
+ xsigm = 1; 	@Not provided as a parameter@	//print "xsigm: " xsigm';
+ 
+ v2 = (ones(nc,1) .*. xbase)*~(dta[.,ivm])'; 
+ w2 = (ones(nc,1) .*. xdel)*~(dta[.,ivd])'; //*~ = horizontal direct product, the number of rows in the matrices need to be the same
+ u2 = (ones(nc,1) .*. xgam)*~(dta[.,ivg])';
+
+ if xsigm<=0;
+   xsigm=1;
+ endif;
+
+
+ j=1;
+ v = {};
+ w = {};
+ u = {};
+ do until j == nc+1;
+   v = v~(sumc(v2[(j-1)*nvarm+1:(j*nvarm),.])); // sumc: sum accross rows for individual, basically summing up the portion of utilities for each alternative
+   w = w~(sumc(w2[(j-1)*nvardel+1:(j*nvardel),.]));
+   u = u~(sumc(u2[(j-1)*nvargam+1:(j*nvargam),.]));
+   j = j+1;
+ endo;
+ 
+ clear v2,w2; 
+
+ vOut = v[.,1:numout]; //print "meanc(vOut): " meanc(vOut);
+
+ a = exp(w); 
+ if _alp0to1;
+   a = 1/(1+exp(w)); 
+ endif;
+
+ f = exp(u); //print "meanc(f): " meanc(f);
+ b = dta[.,flagchm] .> 0;
+ m = sumc((b')); 
+ 
+ @Calculation of v for all the goods other than the outside good@
+ v[.,numout+1:nc] = v[.,numout+1:nc]-a[.,numout+1:nc].*ln((dta[.,flagchm[numout+1:nc]]+f[.,numout+1:nc])./f[.,numout+1:nc])-ln(dta[.,flagprcm[numout+1:nc]]);
+ 
+
+ @T is sum of the budget allocated to the inside goods@
+ T = sumc(dta[.,flagchm[numout+1:nc]]'); 	@There should be no T equal to sero@ 
+ 
+ outgd0 = (ones(repn,1) .*. T) .* (exp(outgd_err.*sigma_u_global)-1); @The budget for nobs observatios is repeated nobs times@
+ outgd0 = (outgd0 .>= 1) .* outgd0 + (outgd0 .< 1);  //print "meanc(outgd0): " meanc(outgd0);
+ clear T;
+ 
+ p00 = zeros(e1,1);
+ for np(1,repn,1);// REPLACING REPN WITH 1
+	outgd = outgd0[(np-1)*e1+1:np*e1,.]; //print "mean, max and min of (outgd): " np  meanc(outgd)  maxc(outgd)  minc(outgd) sumc(outgd.==0);
+	
+	c = (a.*b)./(((outgd~dta[.,flagchm[numout+1:nc]])+f)); 
+	c = c./(dta[.,flagprcm]); 
+	c = substute(c,b.==0,1); 
+	e = (1/c).*b;  
+	d = sumc((e')); 
+	c = (prodc((c'))).*d; 
+	
+	@Calculation of v while including outside good@
+	v[.,1:numout] = vOut-a[.,1:numout].*ln(outgd+f[.,1:numout])-ln(dta[.,flagprcm[1:numout]]);
+	
+	ut = v./xsigm; 
+	p1 = exp(ut); 
+	p2 = (p1.*dta[.,flagavm])./sumc((p1.*dta[.,flagavm])');
+	p3 = substute(p2,b.==0,1);     
+	p3 = (prodc((p3'))).*c.*((m-1)!);  //print meanc(p3);
+	p3 = p3./((xsigm)^(m-1));
+	p00 = p00 + p3;
+	clear outgd, c, p1, p2, p3;
+endfor; // End of error realization
+
+ z = p00 ./ repn; 
+ w1=zeros(e1,1);
+ if z > w1;// sign doing element by element comparison??
+     z1=ln(z);
+  else;
+  print "yes";
+     z1=ln(z-((z.<=w1).*(z-0.0001)));//If sero or negative taking ln of 0.0001 - why???
+ endif;
+
+ retp(z1);
+endp;	
+
+
+@SFT MODEL ESTIMATION CODE WITH WEIGHTS CALCULATED FROM THE MDCEV MODEL ESTIMATES@
+proc lprJoint(x,dta);  
+	local e1;
+	local xbgt,v1bgt, vbgt, sigma_v, sigma_u, sgmbgt, lmdbgt, epsbgt, pbgt, T, pbgtf;
+	local  x_mdcev, f_mdcev, g_mdcev, cov_mdcev, retcode_mdcev;
+	local weight;
+	
+	e1 = rows(dta); 
+	xbgt = x[1:nvarb];     //print "xbgt: " xbgt;
+	sigma_v = x[nvarb+1]^2;	//print "sigma_v: " sigma_v; // standard deviation of v
+	sigma_u = x[nvarb+2]^2;   //print "sigma_u: " sigma_u;  // standard deviation of u
+	sigma_u_global = sigma_u;  // Changing at each iteration of SFT run`
+	
+	
+	// Call to the mdc model
+	{ x_mdcev,f_mdcev,g_mdcev,cov_mdcev,retcode_mdcev } = maxprt(maxlik(dta,0,&lprMdcev,b_mdcev));
+    
+    b_mdcev = x_mdcev;	    // Starting values for next model run
+	
+    output file = newJointEst_mdcev.asc on;
+       print "MDC Log Likelihood value: " f_mdcev;
+       print "MDC parameters: " b_mdcev';
+	   print "SFT parameters: " x';
+       clear f_mdcev;
+	output off;
+
+	@Next calculate weight for the sft model, with the converged values from the mdcev model@
+	weight =  lprMdcev2(x_mdcev,dta);  //print "meanc(ln(weight)): " meanc(ln(weight));
+	clear x_mdcev;
+
+	@Calculation of the budget probability@
+	v1bgt = xbgt*~(dta[.,ivr])'; 
+	vbgt = sumc(v1bgt); // contain regression equation for each individual
+	clear v1bgt;
+ 
+ 
+	@T is sum of the budget allocated to the inside goods@
+	T = sumc(dta[.,flagchm[numout+1:nc]]'); 	@There should be no T equal to sero@ //print "T equal to sero: " sumc(T .== 0); 
+	epsbgt = ln(T) - vbgt; //ln(observed budget) - v
+ 
+	sgmbgt = sqrt(sigma_v^2 + sigma_u^2); //Standard deviation of epsilon
+	lmdbgt = sigma_u./sigma_v;
+ 
+	pbgt = (2 ./ sgmbgt) .* pdfn(epsbgt ./ sgmbgt) .* (1 - cdfn((epsbgt.*lmdbgt)./sgmbgt)); //print "p: "  sumc(p);//((ln(dta[.,Buds]) - v) ./ exp(sigma));
+	
+	output file = newJointEst_sft.asc on;
+       print "SFT unweighted Log Likelihood value: " meanc(ln(pbgt));
+	   print "SFT weighted Log Likelihood value: " meanc(ln(weight.*pbgt));
+	   print "SFT parameters: " x';
+	output off;
+	
+ retp(ln(weight.*pbgt));
+ //retp(ln(pbgt));  // Just a test of whether it converges in one iteration
+endp;
+
+
+
+@THIS IS THE PROC TO CALCULATE THE MDCEV PROBABILITY, (NOT THE LOG OF PROBABILITY)@
+proc lprMdcev2(x,dta);
+	local e1,popass,p0,xdel,xgam,v2,w2,u2,j,v,w,u,a,b,m,c,xsig,ylarge1,ylarge2,fin,as,ass,r,err,ylarge,
+          xsigm,vv,vlos,e,ut,p1,p2,p3,z,w1,z1,d,f,wt, xbase;
+	local T, outgd0, outgd, np, vOut, p00;  
+		  
+ e1 = rows(dta); 	//print "e1: " e1;
+ //wt = dta[.,wtind];	
+ popass = dta[.,_po]; 
+ xbase  =  x[1:nvarm]; 		//print "xbase: " xbase';
+ xdel = eqmatdel'*(-1000); 	@Not provided as a parameter@	//print "xdel: " xdel';  
+ xgam = eqmatgam'*((-1000*ones(numout,1))|x[nvarm+1:rows(x)]); 	//print "xgam: " xgam';
+ xsigm = 1; 	@Not provided as a parameter@	//print "xsigm: " xsigm';
+ 
+ v2 = (ones(nc,1) .*. xbase)*~(dta[.,ivm])'; 
+ w2 = (ones(nc,1) .*. xdel)*~(dta[.,ivd])'; //*~ = horizontal direct product, the number of rows in the matrices need to be the same
+ u2 = (ones(nc,1) .*. xgam)*~(dta[.,ivg])';
+
+ if xsigm<=0;
+   xsigm=1;
+ endif;
+
+ j=1;
+ v = {};
+ w = {};
+ u = {};
+ do until j == nc+1;
+   v = v~(sumc(v2[(j-1)*nvarm+1:(j*nvarm),.])); // sumc: sum accross rows for individual, basically summing up the portion of utilities for each alternative
+   w = w~(sumc(w2[(j-1)*nvardel+1:(j*nvardel),.]));
+   u = u~(sumc(u2[(j-1)*nvargam+1:(j*nvargam),.]));
+   j = j+1;
+ endo;
+ 
+ clear v2,w2; 
+
+ vOut = v[.,1:numout]; //print "meanc(vOut): " meanc(vOut);
+
+ a = exp(w); 
+ if _alp0to1;
+   a = 1/(1+exp(w)); 
+ endif;
+
+ f = exp(u); //print "meanc(f): " meanc(f);
+ b = dta[.,flagchm] .> 0;
+ m = sumc((b')); 
+ 
+ @Calculation of v for all the goods other than the outside good@
+ v[.,numout+1:nc] = v[.,numout+1:nc]-a[.,numout+1:nc].*ln((dta[.,flagchm[numout+1:nc]]+f[.,numout+1:nc])./f[.,numout+1:nc])-ln(dta[.,flagprcm[numout+1:nc]]);
+ 
+
+ @T is sum of the budget allocated to the inside goods@
+ T = sumc(dta[.,flagchm[numout+1:nc]]'); 	@There should be no T equal to sero@ 
+ 
+ outgd0 = (ones(repn,1) .*. T) .* (exp(outgd_err.*sigma_u_global)-1); @The budget for nobs observatios is repeated nobs times@
+ outgd0 = (outgd0 .>= 1) .* outgd0 + (outgd0 .< 1);  //print "meanc(outgd0): " meanc(outgd0);
+ clear T;
+ 
+ p00 = zeros(e1,1);
+ for np(1,repn,1);// REPLACING REPN WITH 1
+	outgd = outgd0[(np-1)*e1+1:np*e1,.]; //print "mean, max and min of (outgd): " np  meanc(outgd)  maxc(outgd)  minc(outgd) sumc(outgd.==0);
+	
+	c = (a.*b)./(((outgd~dta[.,flagchm[numout+1:nc]])+f)); 
+	c = c./(dta[.,flagprcm]); 
+	c = substute(c,b.==0,1); 
+	e = (1/c).*b;  
+	d = sumc((e')); 
+	c = (prodc((c'))).*d; 
+	
+	@Calculation of v while including outside good@
+	v[.,1:numout] = vOut-a[.,1:numout].*ln(outgd+f[.,1:numout])-ln(dta[.,flagprcm[1:numout]]);
+	
+	ut = v./xsigm; 
+	p1 = exp(ut); 
+	p2 = (p1.*dta[.,flagavm])./sumc((p1.*dta[.,flagavm])');
+	p3 = substute(p2,b.==0,1);     
+	p3 = (prodc((p3'))).*c.*((m-1)!);  //print meanc(p3);
+	p3 = p3./((xsigm)^(m-1));
+	p00 = p00 + p3;
+	clear outgd, c, p1, p2, p3;
+endfor; // End of error realization
+
+ z = p00 ./ repn; 
+ 
+ retp(z);
+endp;	
+
+
+@This will not generate uniform halton draws but will use the previously generated 
+halton draws to generate the half normal@
+@1st nrep realizations are given to the 1st observation and so on...@
+proc hnormHalt(nobs, nrep);
+	local a,b, F_a, F_b, meu, meu_bar, err, r, err_r;
+	a = 0; b = 10000; //This is the numerical value for +ve infinity
+	F_a = cdfn(a);  F_b = cdfn(b);  //print "F(a): " cdfn(a)  "F(b): " cdfn(b);
+	
+	@Draw from a uniform random@
+	meu = reshape(haltmat,nobs,nrep);  @Giving first nrep to the 1st individual, 2nd nrep to the 2nd individual and so on...@
+	meu = reshape(meu',nobs*nrep,1); @IT IS SORTED AS NOBS*NREP@ @nobs sized matrix repeated nrep times@
+	meu_bar = (1-meu).*F_a + meu.*F_b;
+	
+	err = cdfNi(meu_bar); //print "mean: " meanc(err) "standard deviation: " stdc(err);
+	 
+	@Draw the histogram of the error term@
+	//hist(err,100);
+
+	@Mean and standard deviation of err@
+	@Mean of the error should be sqrt(2/pi())*sigma_u, standard deviation of u should be,sqrt((pi()-2)/pi())*sigma_u @
+	/*for r(1,nrep,1);
+		err_r = err[(r-1)*nobs+1:r*nobs,.];
+		//print "r: " r "meanc(err): " meanc(err_r) "standard deviation: " stdc(err_r);
+		hist(err_r,100);
+	endfor;*/
+			
+	@This is the theoretical mean and standard deviation @
+	/*print "mean check: sqrt(2/pi()): " sqrt(2/pi())*sigma_u;  // sigma_u = 10, mean: about 8
+	print "standard deviation check: sqrt((pi-2)/pi)*sigma_u: " sqrt((pi()-2)/pi())*sigma_u;  // st. dev. about 6*/
+	
+	retp(err);
+endp;

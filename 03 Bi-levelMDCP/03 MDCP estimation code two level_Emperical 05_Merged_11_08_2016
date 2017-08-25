@@ -1,0 +1,3190 @@
+/*********NOTES FOR ME**********************/   
+/*In this program, for the st. dev. of the betas the lower triangle of the cholesky decomposition is provided as a column vector,
+The final st. error is also calculated for the cholesky decomposition of the variance covariance matrix
+
+the number of cholesky factor estimated should be nmix*(nmix+1)/2, where nmix is the number of random parameters*/
+
+/*For the variance covariance amtrix of the error term of the choice model, an upper triangle of the cholesky decomposition
+of the error difference is provided - the number of elements estimated in for the cholesky decomposition of the error covariance 
+is (nc-1)nc/2 if there is price variation where nc is the number of alternatives, 
+if there is no price variation there will be the top left element needs to be fixed
+
+Final standard errors are calculated for the cholesky factor*/
+
+/**ANALYTICAL GRADIENT WRITTEN AND TESTED ON DECEMBER 2014 BY ANNESHA ENAM******/
+new;
+library maxlik;
+maxset;
+
+/*****************************************************************************
+                  Global Variable Definitions
+*****************************************************************************/
+clearg __row,nobs,_config,_alp0to1,_price, _randper, _randd, datatset,_po,post_obs, nrep, Gradient_Store, Gradient_Store1, nc_top, nc_bot, _cholk;
+cls;
+
+
+//__row    = 2093;    // Number of rows to be read at a time by the log-likelihood function
+//nobs     = 2093;    // Number of observations in the dataset
+_config  = 4;       // This model is only written for configuration 4; i.e. for gamma specification
+_alp0to1 = 1;       // 1 if you want the Alpha values to be constrained between 0 and 1, 0 otherwise
+_price   = 0;       // 1 if there is price variation across goods, 0 otherwise
+
+nc_top   = 8;       // Number of alternatives in the top nest
+numout_top = 1;     // Number of outside goods in the top level; the no_tour option
+numout_bot = 2;  // Number of outside goods in the bottom level; the main activity and the return home tour
+nc_bot = { 0,9,8,7,6,5,5,5 }; // nc_bot will be a nc_top by 1 column vector, each of the element will hold the number of alternatives in each of the bottom nests 
+_cholk = 1;        // If cholesky factors are to be estimated
+
+/* Evaluation of the multivariate normal cumulative distribution function (cdf)
+   To improve running times, it is recommended to use MACML for the estimation. Otherwise, the user can use the GAUSS function 
+   cdfn to compute the cdf */
+_macml   = 1;    	// 1 if using MACML to estimate the multivariate normal cdf, 0 if using the biult-in GAUSS function
+_randper = 1;       // MACML variable: random permutations of all digits 
+_randd   = 0;       // MACML variable: all permutations or random permutations
+
+
+//dataset  = "C:\\AnneshaEnam\\GaussWorkingFiles\\NHTS\\Revision\\Merged_AZ_LA_5263.dat"; // provide path for the gauss data matrix // For remote desktop
+dataset  = "C:\\Users\\ane13003\\OneDrive - University of Connecticut\\NHTSData_2008_2009\\GAUSS_Emperical\\Merged_AZ_LA_5263.dat"; // provide path for the gauss data matrix  // For laptop machine
+dataMat = loadd(dataset);
+//meanc(dataMat);
+
+//{ pointer,_po } = indices(dataset,"caseid"); // position of pointer to case number in data set, modify if the case number column 
+
+/*****************************************************************************
+                    Variable Specification Area
+*****************************************************************************/
+/* Position of UNO variable (i.e., the column of ones) in data set. 
+   The dataset should consist of a column of ones.
+   Modify if the label (in double-quotes) of the column of ones in your dataset is different from "uno"  */
+{ unov,ivuno } = indices(dataset,"uno");
+
+/* Position of zero variable (i.e., the column of zeros) in data set. 
+   The dataset should consist of a column of zeros.
+   Modify if the label (in double-quotes) of the column of zeros in your dataset is different from "zero"  */
+{ zerov,ivzero } = indices(dataset,"zero");
+
+/* Position of WEIGHT variable (i.e., the column of weights).
+   If the data has weights, then the dataset should consist of a column of weights. 
+   Modify the label (in double-quotes) with the label of the weight variable, if your data has weights  */
+{ weight,wtind } = indices(dataset,"uno");
+
+/* Positions of the DEPENDENT Variables (i.e., the consumption quantities for each alternative - NOT consumption expenditures for each alternative).  
+   Provide labels (one label in each double-quote) of the dependent variables (i.e., consumption quantities) in your dataset. 
+   Number of labels = number of alternatives. */
+  
+  @DEFINE ALL THE ALTERNATIVES BOTH IN THE TOP NEST AS WELL AS IN THE BOTTOM NEST@
+  @THE SERIAL SHOULD BE TOP NEST THEN 1ST BOTTOM NEST, THEN 2ND BOTTOM NEST THEN SO ON@
+
+{ choicm,f } = indices(dataset,"atHome"|"WORK_N"| "SCHOOL_N"| "ESCORT_N"| "PERBUS_N"| "SHOP_N"| "MEAL_N"| "SOCREC_N"| // Top nest
+                                "W_MAIN"|"W_RTHM"|"W_WORK"|"W_SCHOL"|"W_ESCRT"|"W_PERBS"|"W_SHOP"|"W_MEAL"|"W_SOCRC"|  // Work nest
+								"SC_MAIN"|"SC_RTHM"|"SC_SCHOL"|"SC_ESCRT"|"SC_PERBS"|"SC_SHOP"|"SC_MEAL"|"SC_SOCRC"|   // School nest
+								"E_MAIN"|"E_RTHM"|"E_ESCRT"|"E_PERBS"|"E_SHOP"|"E_MEAL"|"E_SOCRC"|                     // Escort nest
+								"P_MAIN"|"P_RTHM"|"P_PERBS"|"P_SHOP"|"P_MEAL"|"P_SOCRC"|							   // Personal business nest	
+								"SH_MAIN"|"SH_RTHM"|"SH_SHOP"|"SH_MEAL"|"SH_SOCRC"|									   // Shopping nest	
+								"M_MAIN"|"M_RTHM"|"M_SHOP"|"M_MEAL"|"M_SOCRC"|										   // Meal nest	
+								"SR_MAIN"|"SR_RTHM"|"SR_SHOP"|"SR_MEAL"|"SR_SOCRC" ); 								   // Social recreation nest	
+
+// Only taking the individual for whom we have 1440 count of day.........
+//print "1440 minutes: " sumc(sumc(dataMat[.,f[1:nc_top]]') .== 1440);
+dataMat = selif(dataMat,(sumc(dataMat[.,f[1:nc_top]]') .== 1440));   //print "rows dataMat: " rows(dataMat);
+nobs = rows(dataMat);  //print "nobs: " nobs;  // 5233
+
+
+/* Positions of PRICE variables
+   Provide labels of price variables (one label in each double-quote). Number of labels = number of alternatives.
+   Provide all UNO variables if there is no price variation */
+//{ cprice,fp } = indices(dataset,"uno"|"uno");//|"uno");//|"uno"|"uno");//|"uno"|"uno"|"uno"|"uno"|"uno");
+
+/* Definition of INDEPENDENT variables */
+
+/* In the following specification, ivm1, ivm2, ivm3 contain independent variable specifications (on right hand side) for baseline utility (PSI) for alternatives 1, 2 and 3
+   Add a row for ivm4 below if there is a 4th alternative, another addiitonal row for ivm5 if there is a 5th alternative, ...  (number of rows = number of alternatives);
+   Number of columns = Number of variables including alternative specific constants; consider first alternative as base  */
+
+@THIS IS THE BASLINE UTILITY SPECIFICATION FOR THE TOP NEST@ 
+
+let	ivm1	=	{	zero 	zero 	zero   zero 	zero	zero	zero	zero 	zero   zero 	zero	zero	zero	zero 	zero 	zero	zero	zero 	zero 		zero	zero 		zero	zero	zero 	zero 	zero 		zero	zero	zero	zero 		zero	zero	zero 	zero 		zero	zero	zero 	zero 		zero	zero	zero     zero	};
+let	ivm2	=	{	uno 	zero	zero   zero 	zero 	zero	zero	zero 	zero   age1 	zero	zero	zero	ageNew2 zero 	zero	zero	zero 	incg2 		zero	zero 		zero	zero	zero 	zero 	zero 		zero	zero	zero	zero 		zero	zero	zero 	zero 		zero	wPrtDum	zero 	zero 		zero	zero	zero     zero	};
+let	ivm3	=	{	zero 	uno 	zero   zero 	zero 	zero	zero	male 	zero   zero 	age1	zero	zero	zero 	ageNew2 zero	zero	zero 	zero 		zero	zero 		incg3	zero	zero 	zero 	zero 		zero	zero	zero	zero 		zero	frday	zero 	zero 		zero	zero	wPrtDum zero 		zero	zero	zero     zone	};
+let	ivm4	=	{	zero  	zero 	uno    zero 	zero 	zero 	zero	zero 	male   zero 	zero	zero	zero	zero 	zero 	ageNew2	zero	zero 	zero 		zero	zero 		zero	zero	zero 	zero 	zero 		zero	zero	zero	zero 		zero	zero	zero 	zero 		zero	zero	zero 	wPrtDum 	zero	zero	zero     zero	};
+let	ivm5	=	{	zero 	zero 	zero   uno 		zero 	zero 	zero 	zero 	zero   zero 	zero	age1	zero	zero 	zero 	zero	ageNew2	ageNew3 zero 		zero	zero 		zero	zero	zero 	zero 	zero 		zero	zero	urbDum	zero 		zero	zero	zero 	zero 		zero	zero	zero 	zero 		wPrtDum	zero	zero     zero	};
+let	ivm6	=	{	zero 	zero 	zero   zero 	uno 	zero 	zero 	zero 	zero   zero 	zero	zero	zero	zero 	zero 	zero	zero	zero 	zero 		zero	zero 		zero	incg3	zero 	zero 	incg4 		zero	zero	zero	urbDum 		zero	zero	frday 	zero 		zero	zero	zero 	zero 		zero	wPrtDum	zero     zero	};
+let	ivm7	=	{	zero 	zero 	zero   zero 	zero 	uno 	zero 	zero 	zero   zero 	zero	zero	zero	zero 	zero 	zero	zero	zero 	zero 		incg2	zero 		zero	zero	incg3 	zero 	zero 		incg4	zero	zero	zero 		zero	zero	zero 	frday 		zero	zero	zero 	zero 		zero	zero	zero     zero	};
+let	ivm8	=	{	zero 	zero 	zero   zero 	zero 	zero 	uno 	zero 	zero   zero 	zero	zero	age1	zero 	zero 	zero	zero	zero 	zero 		zero	incg2 		zero	zero	zero    incg3 	zero 		zero	incg4	zero	zero 		urbDum	zero	zero 	zero 		frday	zero	zero 	zero 		zero	zero	wPrtDum  zero	};
+
+//Add a row for v4 below if there is a 4th alternative, another additional row for v5 if there is a 5th alternative,.... (number of rows = number of alternatives)
+{ v1,ivmt1 }   = indices(dataset,ivm1');
+{ v2,ivmt2 }   = indices(dataset,ivm2');
+{ v3,ivmt3 }   = indices(dataset,ivm3');
+{ v4,ivmt4 }   = indices(dataset,ivm4');
+{ v5,ivmt5 }   = indices(dataset,ivm5');
+{ v6,ivmt6 }   = indices(dataset,ivm6');
+{ v7,ivmt7 }   = indices(dataset,ivm7');
+{ v8,ivmt8 }   = indices(dataset,ivm8');
+
+// DEFINE BASELINE UTILITY SPECIFICATIONS FOR THE BOTTOM NESTS
+
+@THIS IS FOR WORK TOUR@
+let	ivm11	=	{	zero 	zero 	zero   zero 	zero	zero	zero	zero  zero 	zero   zero 	zero	zero 	zero  zero 	zero 	zero   zero 	zero	zero 	zero 	zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	zero   	zero 	zero   	zero	zero   	zero 	zero   	zero 	zero  	zero   	zero	zero	zero   	zero   	zero 	zero  	zero	zero   	zero   	zero };
+let	ivm12	=	{	uno 	zero	zero   zero 	zero 	zero	zero	zero  zero 	zero   zero 	zero	zero    zero  zero 	zero 	zero   zero 	zero	zero 	zero 	zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	zero   	zero 	zero   	zero	zero   	zero 	zero   	zero 	zero  	zero   	zero	zero	zero   	zero   	zero 	zero    zero	zero   	zero   	zero };
+let	ivm13	=	{	zero 	uno 	zero   zero 	zero 	zero	zero	zero  zero 	zero   zero 	zero	zero    age1  zero 	zero 	zero   zero 	zero	ageNew2 zero 	zero   	zero 	zero	zero 	zero	incg3 zero	zero 	zero   	zero 	zero	zero 	zero   	flxTmDm zero   	zero	zero   	zero 	zero   	zero 	zero  	zero    zero	zero   	drvDum	zero   	zero 	zero    zone	zero   	zero   	zero } ;
+let	ivm14	=	{	zero  	zero 	uno    zero 	zero 	zero 	zero	zero  zero 	zero   zero 	zero	zero    zero  age1 	zero 	zero   zero 	zero	zero 	zero 	zero   	zero 	zero	zero 	incg2	zero  incg3	zero 	zero   	zero 	incg4	zero 	zero   	zero 	zero   	zero	zero   	zero 	zero   	zero 	zero    frday   zero	zero	zero   	zero   	zero 	zero    zero	zero   	zero   	zero };
+let	ivm15	=	{	zero 	zero 	zero   uno 		zero 	zero 	zero 	zero  male 	zero   zero 	zero	zero    zero  zero 	age1 	zero   zero 	zero	zero 	ageNew2 zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	zero   	zero 	flxTmDm zero	zero   	zero 	zero   	zero 	zero  	zero   	zero	zero	zero   	zero   	zero 	zero    zero	zone   	zero   	zero };
+let	ivm16	=	{	zero 	zero 	zero   zero 	uno 	zero 	zero 	zero  zero 	male   zero 	zero	zero    zero  zero 	zero 	age1   zero 	zero	zero 	zero 	ageNew2 zero 	zero	ageNew3 zero	zero  zero	incg3 	zero   	zero 	zero	zero 	zero   	zero 	zero    flxTmDm	zero   	zero 	zero   	zero 	zero  	zero   	frday	zero	zero   	zero   	zero 	zero    zero	zero   	zero   	zero };
+let	ivm17	=	{	zero 	zero 	zero   zero 	zero 	uno 	zero 	zero  zero 	zero   male 	zero	zero    zero  zero 	zero 	zero   age1 	zero	zero 	zero 	zero   	ageNew2 zero	zero 	zero	zero  zero	zero 	incg3   zero 	zero	zero 	zero    zero 	zero    zero	flxTmDm zero 	zero   	urbDum 	zero  	zero   	zero	zero	zero    drvDum  zero 	zero    zero	zero   	zone   	zero };
+let	ivm18	=	{	zero 	zero 	zero   zero 	zero 	zero 	uno 	zero  zero 	zero   zero 	male	zero    zero  zero 	zero 	zero   zero 	age1	zero 	zero 	zero   	zero 	ageNew2	zero 	zero	zero  zero	zero 	zero   	incg3 	zero	incg4 	zero   	zero 	zero    zero	zero    flxTmDm zero   	zero 	zero  	zero   	zero	frday	zero   	zero   	drvDum 	zero    zero	zero   	zero   	zero };
+let	ivm19	=	{	zero 	zero 	zero   zero 	zero 	zero 	zero 	uno   zero 	zero   zero 	zero	male    zero  zero 	zero 	zero   zero 	zero	zero 	zero 	zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	incg4   zero 	zero    zero	zero    zero 	flxTmDm zero 	urbDum  zero   	zero	zero	zero   	zero   	zero 	drvDum  zero	zero   	zero   	zone };
+
+@THIS IS FOR SCHOOL TOUR@
+let	ivm21	=	{	zero 	zero 	zero   zero 	zero	zero	zero	zero 	zero 	zero   zero 	zero	zero	zero   	zero  zero	};
+let	ivm22	=	{	uno 	zero	zero   zero 	zero 	zero	zero	zero 	zero 	zero   zero 	zero	zero	zero   	zero  zero	};
+let	ivm23	=	{	zero 	uno 	zero   zero 	zero 	zero	zero	male 	zero 	zero   zero 	incg3	zero	zero   	zero  zero	};
+let	ivm24	=	{	zero  	zero 	uno    zero 	zero 	zero 	zero	zero 	age1 	zero   zero 	zero	incg3	zero   	zero  zero	};
+let	ivm25	=	{	zero 	zero 	zero   uno 		zero 	zero 	zero 	zero 	zero 	age1   zero 	zero	zero	incg3 	zero  zero	};
+let	ivm26	=	{	zero 	zero 	zero   zero 	uno 	zero 	zero 	zero 	zero 	zero   age1 	zero	zero	zero   	zero  urbDum	};
+let	ivm27	=	{	zero 	zero 	zero   zero 	zero 	uno 	zero 	zero 	zero 	zero   zero 	zero	zero	zero   	zero  zero	};
+let	ivm28	=	{	zero 	zero 	zero   zero 	zero 	zero 	uno 	zero	zero 	zero   zero 	zero	zero	zero   	incg3 zero	};
+
+@THIS IS FOR ESCORT TOUR@
+let	ivm31	=	{	zero 	zero 	zero   zero 	zero	zero	zero 	zero   zero 	zero	zero 	zero 	zero   zero 	zero	zero 	zero 	zero	zero 	zero 	zero   	zero 	zero	zero   zero   zero   	zero 	zero	zero   		zero  	 };//zero		zero   		zero };
+let	ivm32	=	{	uno 	zero	zero   zero 	zero 	zero	zero 	zero   zero 	zero	zero    zero 	zero   zero 	zero	zero 	zero 	zero	zero 	zero 	zero   	zero 	zero	zero   zero   zero   	zero 	zero	zero   		zero  	 };//zero		zero   		zero };
+let	ivm33	=	{	zero 	uno 	zero   zero 	zero 	zero	male 	zero   zero 	zero	zero    zero 	zero   zero 	zero	zero 	zero 	zero	zero 	zero 	incg3   zero 	zero	incg4  zero   zero   	zero 	zero	zone   		zero  	 };//drvDum		zero   		zero };
+let	ivm34	=	{	zero  	zero 	uno    zero 	zero 	zero 	zero 	male   zero 	zero	age1    zero 	zero   ageNew2 	zero	ageNew3 zero 	zero	zero 	zero 	zero   	zero 	zero	zero   zero   zero   	urbDum 	zero	zero   		zero 	 };//zero		zero   		zero };
+let	ivm35	=	{	zero 	zero 	zero   uno 		zero 	zero 	zero 	zero   male 	zero	zero    age1 	zero   zero 	zero	zero 	zero 	incg2	zero 	zero 	zero   	incg3 	zero	zero   incg4  zero   	zero 	zero	zero   		zero     };//zero		zero   		zero };
+let	ivm36	=	{	zero 	zero 	zero   zero 	uno 	zero 	zero 	zero   zero 	male	zero    zero 	age1   zero 	ageNew2	zero 	ageNew3 zero	incg2 	zero 	zero   	zero 	zero	zero   zero   zero   	zero 	zero	zero   		zone     };//zero		drvDum   	zero };
+let	ivm37	=	{	zero 	zero 	zero   zero 	zero 	uno 	zero 	zero   zero 	zero	zero    zero 	zero   zero 	zero	zero 	zero 	zero	zero 	incg2 	zero   	zero 	incg3	zero   zero   incg4   	zero 	urbDum	zero   		zero     };//zero		zero   		drvDum };
+
+@THIS IS FOR PERSONAL BUSINESS TOUR@
+let	ivm41	=	{	zero 	zero 	zero   zero 	zero	zero   zero 	zero   zero 	zero   zero 	zero  	zero 		zero     zero 	   zero     zero 	   zero    zero   zero 	   zero    };
+let	ivm42	=	{	uno 	zero	zero   zero 	zero 	zero   zero 	zero   zero 	zero   zero 	zero  	zero 		zero     zero 	   zero 	zero 	   zero    zero   zero     zero    };
+let	ivm43	=	{	zero 	uno 	zero   zero 	zero 	zero   zero 	zero   age1 	zero   ageNew2 	zero  	zero 	    ageNew3  zero 	   zero     zero 	   zero    frday  zero     zone    };
+let	ivm44	=	{	zero  	zero 	uno    zero 	zero 	male   zero 	zero   zero 	zero   zero 	ageNew2 zero 		zero  	 zero 	   zero 	urbDum     zero    zero   zero     zero    };
+let	ivm45	=	{	zero 	zero 	zero   uno 		zero 	zero   male 	zero   zero 	age1   zero 	zero  	zero 		zero     zero 	   zero 	zero       urbDum  zero   frday    zero    };
+let	ivm46	=	{	zero 	zero 	zero   zero 	uno 	zero   zero 	male   zero 	zero   zero 	zero  	ageNew2 	zero     ageNew3   incg4 	zero       zero    zero   zero     zero    };
+
+@THIS IS FOR SHOP TOUR@
+let	ivm51	=	{	zero 	zero 	zero   zero 	zero 	zero 	zero 	zero 	zero 	zero 	zero  zero 	zero 	zero 	zero 	zero 	zero 	};
+let	ivm52	=	{	uno 	zero	zero   zero 	zero 	zero 	zero  	zero 	zero 	zero 	zero  zero 	zero 	zero 	zero 	zero 	zero 	};
+let	ivm53	=	{	zero 	uno 	zero   zero 	zero 	ageNew2 zero    ageNew3 zero 	incg2 	zero  incg3 zero 	incg4 	zero 	zero 	drvdum 	};
+let	ivm54	=	{	zero  	zero 	uno    zero 	zero  	zero 	zero  	zero 	zero 	zero 	zero  zero 	incg3 	zero 	incg4 	frday 	zero 	};
+let	ivm55	=	{	zero 	zero 	zero   uno 		age1 	zero 	ageNew2 zero 	ageNew3 zero 	incg2 zero 	zero 	zero 	zero 	zero 	zero 	};
+
+@THIS IS FOR MEAL TOUR@
+let	ivm61	=	{	zero 	zero 	zero   zero 	zero 	zero 	zero 	zero 	zero 	zero 	zero 	};
+let	ivm62	=	{	uno 	zero	zero   zero 	zero 	zero 	zero    zero 	zero 	zero 	zero 	};
+let	ivm63	=	{	zero 	uno 	zero   zero 	ageNew3 zero 	incg3   incg4   urbDum 	zero 	zone 	};
+let	ivm64	=	{	zero  	zero 	uno    zero 	zero 	incg2 	zero   	zero    zero 	zero 	zero 	};
+let	ivm65	=	{	zero 	zero 	zero   uno 		zero 	zero	zero    zero   	zero 	urbDum 	zero 	};
+
+@THIS IS FOR SOCIAL RECREATION TOUR@
+let	ivm71	=	{	zero 	zero 	zero   zero 	zero    zero	zero 	zero  	};
+let	ivm72	=	{	uno 	zero	zero   zero 	zero   	zero 	zero 	zero  	};
+let	ivm73	=	{	zero 	uno 	zero   zero 	male    incg2   drvDum 	zero  	};
+let	ivm74	=	{	zero  	zero 	uno    zero 	zero   	zero 	zero 	urbDum  };
+let	ivm75	=	{	zero 	zero 	zero   uno 		zero   	zero 	zero 	zero 	};
+
+
+{ v11,ivmt11 } = indices(dataset,ivm11');
+{ v12,ivmt12 } = indices(dataset,ivm12');
+{ v13,ivmt13 } = indices(dataset,ivm13');
+{ v14,ivmt14 }   = indices(dataset,ivm14');
+{ v15,ivmt15 }   = indices(dataset,ivm15');
+{ v16,ivmt16 }   = indices(dataset,ivm16');
+{ v17,ivmt17 }   = indices(dataset,ivm17');
+{ v18,ivmt18 }   = indices(dataset,ivm18');
+{ v19,ivmt19 }   = indices(dataset,ivm19');
+
+{ v21,ivmt21 } = indices(dataset,ivm21');
+{ v22,ivmt22 } = indices(dataset,ivm22');
+{ v23,ivmt23 } = indices(dataset,ivm23');
+{ v24,ivmt24 }   = indices(dataset,ivm24');
+{ v25,ivmt25 }   = indices(dataset,ivm25');
+{ v26,ivmt26 }   = indices(dataset,ivm26');
+{ v27,ivmt27 }   = indices(dataset,ivm27');
+{ v28,ivmt28 }   = indices(dataset,ivm28');
+
+{ v31,ivmt31 } = indices(dataset,ivm31');
+{ v32,ivmt32 } = indices(dataset,ivm32');
+{ v33,ivmt33 } = indices(dataset,ivm33');
+{ v34,ivmt34 }   = indices(dataset,ivm34');
+{ v35,ivmt35 }   = indices(dataset,ivm35');
+{ v36,ivmt36 }   = indices(dataset,ivm36');
+{ v37,ivmt37 }   = indices(dataset,ivm37');
+
+{ v41,ivmt41 } = indices(dataset,ivm41');
+{ v42,ivmt42 } = indices(dataset,ivm42');
+{ v43,ivmt43 } = indices(dataset,ivm43');
+{ v44,ivmt44 }   = indices(dataset,ivm44');
+{ v45,ivmt45 }   = indices(dataset,ivm45');
+{ v46,ivmt46 }   = indices(dataset,ivm46');
+
+
+{ v51,ivmt51 } = indices(dataset,ivm51');
+{ v52,ivmt52 } = indices(dataset,ivm52');
+{ v53,ivmt53 } = indices(dataset,ivm53');
+{ v54,ivmt54 }   = indices(dataset,ivm54');
+{ v55,ivmt55 }   = indices(dataset,ivm55');
+
+
+{ v61,ivmt61 } = indices(dataset,ivm61');
+{ v62,ivmt62 } = indices(dataset,ivm62');
+{ v63,ivmt63 } = indices(dataset,ivm63');
+{ v64,ivmt64 }   = indices(dataset,ivm64');
+{ v65,ivmt65 }   = indices(dataset,ivm65');
+
+
+{ v71,ivmt71 } = indices(dataset,ivm71');
+{ v72,ivmt72 } = indices(dataset,ivm72');
+{ v73,ivmt73 } = indices(dataset,ivm73');
+{ v74,ivmt74 }   = indices(dataset,ivm74');
+{ v75,ivmt75 }   = indices(dataset,ivm75');
+
+
+/*******END OF DEFINITION OF BASSELINE UTILITY FOR TOP AND BOTTOM NEST*************************/
+										
+
+// DEFINE BASELINE UTILITY FOR THE BOTTOM NESTS THAT WILL GO TO THE TOP NEST, THAT IS THE SAME BOTTOM NEST UTILITY WITHOUT THE CONSTANT
+
+@THIS IS FOR WORK TOUR@
+let	ivmm11	=	{	zero 	zero   zero 	zero	zero 	zero  zero 	zero 	zero   zero 	zero	zero    zero 	zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	zero   	zero 	zero   	zero	zero   	zero 	zero   	zero 	zero  	zero   	zero	zero	zero   	zero   	zero 	zero  	zero	zero	zero   	zero };
+let	ivmm12	=	{	zero 	zero   zero 	zero	zero    zero  zero 	zero 	zero   zero 	zero	zero    zero 	zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	zero   	zero 	zero   	zero	zero   	zero 	zero   	zero 	zero  	zero   	zero	zero	zero   	zero   	zero 	zero    zero	zero	zero   	zero };
+let	ivmm13	=	{	zero 	zero   zero 	zero	zero    age1  zero 	zero 	zero   zero 	zero	ageNew2 zero 	zero   	zero 	zero	zero 	zero	incg3 zero	zero 	zero   	zero 	zero	zero 	zero   	flxTmDm zero   	zero	zero   	zero 	zero   	zero 	zero  	zero    zero	zero   	drvDum	zero   	zero 	zero    zone	zero	zero   	zero } ;
+let	ivmm14	=	{	zero 	zero   zero 	zero	zero    zero  age1 	zero 	zero   zero 	zero	zero    zero 	zero   	zero 	zero	zero 	incg2	zero  incg3	zero 	zero   	zero 	incg4	zero 	zero   	zero 	zero   	zero	zero   	zero 	zero   	zero 	zero    frday   zero	zero	zero   	zero   	zero 	zero    zero	zero	zero   	zero };
+let	ivmm15	=	{	male 	zero   zero 	zero	zero    zero  zero 	age1 	zero   zero 	zero	zero    ageNew2 zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	zero   	zero 	flxTmDm zero	zero   	zero 	zero   	zero 	zero  	zero   	zero	zero	zero   	zero   	zero 	zero    zero	zone	zero   	zero };
+let	ivmm16	=	{	zero 	male   zero 	zero	zero    zero  zero 	zero 	age1   zero 	zero	zero    zero 	ageNew2 zero 	zero	ageNew3 zero	zero  zero	incg3 	zero   	zero 	zero	zero 	zero   	zero 	zero    flxTmDm	zero   	zero 	zero   	zero 	zero  	zero   	frday	zero	zero   	zero   	zero 	zero    zero	zero	zero   	zero };
+let	ivmm17	=	{	zero 	zero   male 	zero	zero    zero  zero 	zero 	zero   age1 	zero	zero    zero 	zero   	ageNew2 zero	zero 	zero	zero  zero	zero 	incg3   zero 	zero	zero 	zero    zero 	zero    zero	flxTmDm zero 	zero   	urbDum 	zero  	zero   	zero	zero	zero    drvDum  zero 	zero    zero	zero	zone   	zero };
+let	ivmm18	=	{	zero 	zero   zero 	male	zero    zero  zero 	zero 	zero   zero 	age1	zero    zero 	zero   	zero 	ageNew2	zero 	zero	zero  zero	zero 	zero   	incg3 	zero	incg4 	zero   	zero 	zero    zero	zero    flxTmDm zero   	zero 	zero  	zero   	zero	frday	zero   	zero   	drvDum 	zero    zero	zero	zero   	zero };
+let	ivmm19	=	{	zero 	zero   zero 	zero	male    zero  zero 	zero 	zero   zero 	zero	zero    zero 	zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	incg4   zero 	zero    zero	zero    zero 	flxTmDm zero 	urbDum  zero   	zero	zero	zero   	zero   	zero 	drvDum  zero	zero	zero   	zone };
+
+@THIS IS FOR SCHOOL TOUR@
+let	ivmm21	=	{	zero 	zero 	zero   zero 	zero	zero	zero   	zero  	zero	};
+let	ivmm22	=	{	zero 	zero 	zero   zero 	zero	zero	zero   	zero  	zero	};
+let	ivmm23	=	{	male 	zero 	zero   zero 	incg3	zero	zero   	zero  	zero	};
+let	ivmm24	=	{	zero 	age1 	zero   zero 	zero	incg3	zero   	zero  	zero	};
+let	ivmm25	=	{	zero 	zero 	age1   zero 	zero	zero	incg3 	zero  	zero	};
+let	ivmm26	=	{	zero 	zero 	zero   age1 	zero	zero	zero   	zero  	urbDum	};
+let	ivmm27	=	{	zero 	zero 	zero   zero 	zero	zero	zero   	zero  	zero	};
+let	ivmm28	=	{	zero	zero 	zero   zero 	zero	zero	zero   	incg3 	zero	};
+
+@THIS IS FOR ESCORT TOUR@
+let	ivmm31	=	{	zero 	zero   zero 	zero	zero 	zero 	zero   zero 	zero	zero 	zero 	zero	zero 	zero 	zero   	zero 	zero	zero   zero   zero   	zero 	zero	zero   		zero  	 };//zero		zero   		zero };
+let	ivmm32	=	{	zero 	zero   zero 	zero	zero    zero 	zero   zero 	zero	zero 	zero 	zero	zero 	zero 	zero   	zero 	zero	zero   zero   zero   	zero 	zero	zero   		zero  	 };//zero		zero   		zero };
+let	ivmm33	=	{	male 	zero   zero 	zero	zero    zero 	zero   zero 	zero	zero 	zero 	zero	zero 	zero 	incg3   zero 	zero	incg4  zero   zero   	zero 	zero	zone   		zero  	 };//drvDum		zero   		zero };
+let	ivmm34	=	{	zero 	male   zero 	zero	age1    zero 	zero   ageNew2 	zero	ageNew3 zero 	zero	zero 	zero 	zero   	zero 	zero	zero   zero   zero   	urbDum 	zero	zero   		zero 	 };//zero		zero   		zero };
+let	ivmm35	=	{	zero 	zero   male 	zero	zero    age1 	zero   zero 	zero	zero 	zero 	incg2	zero 	zero 	zero   	incg3 	zero	zero   incg4  zero   	zero 	zero	zero   		zero     };//zero		zero   		zero };
+let	ivmm36	=	{	zero 	zero   zero 	male	zero    zero 	age1   zero 	ageNew2	zero 	ageNew3 zero	incg2 	zero 	zero   	zero 	zero	zero   zero   zero   	zero 	zero	zero   		zone     };//zero		drvDum   	zero };
+let	ivmm37	=	{	zero 	zero   zero 	zero	zero    zero 	zero   zero 	zero	zero 	zero 	zero	zero 	incg2 	zero   	zero 	incg3	zero   zero   incg4   	zero 	urbDum	zero   		zero     };//zero		zero   		drvDum };
+
+@THIS IS FOR PERSONAL BUSINESS TOUR@
+let	ivmm41	=	{	zero   zero 	zero   zero 	zero   zero 	zero  	zero 		zero     zero 	   zero     zero 	   zero    zero   zero 	   zero    };
+let	ivmm42	=	{	zero   zero 	zero   zero 	zero   zero 	zero  	zero 		zero     zero 	   zero 	zero 	   zero    zero   zero     zero    };
+let	ivmm43	=	{	zero   zero 	zero   age1 	zero   ageNew2 	zero  	zero 	    ageNew3  zero 	   zero     zero 	   zero    frday  zero     zone    };
+let	ivmm44	=	{	male   zero 	zero   zero 	zero   zero 	ageNew2 zero 		zero  	 zero 	   zero 	urbDum     zero    zero   zero     zero    };
+let	ivmm45	=	{	zero   male 	zero   zero 	age1   zero 	zero  	zero 		zero     zero 	   zero 	zero       urbDum  zero   frday    zero    };
+let	ivmm46	=	{	zero   zero 	male   zero 	zero   zero 	zero  	ageNew2 	zero     ageNew3   incg4 	zero       zero    zero   zero     zero    };
+
+@THIS IS FOR SHOP TOUR@
+let	ivmm51	=	{	zero 	zero 	zero 	zero 	zero 	zero 	zero  zero 	zero 	zero 	zero 	zero 	zero 	};
+let	ivmm52	=	{	zero 	zero 	zero  	zero 	zero 	zero 	zero  zero 	zero 	zero 	zero 	zero 	zero 	};
+let	ivmm53	=	{	zero 	ageNew2 zero    ageNew3 zero 	incg2 	zero  incg3 zero 	incg4 	zero 	zero 	drvdum 	};
+let	ivmm54	=	{	zero  	zero 	zero  	zero 	zero 	zero 	zero  zero 	incg3 	zero 	incg4 	frday 	zero 	};
+let	ivmm55	=	{	age1 	zero 	ageNew2 zero 	ageNew3 zero 	incg2 zero 	zero 	zero 	zero 	zero 	zero 	};
+
+@THIS IS FOR MEAL TOUR@
+let	ivmm61	=	{	zero 	zero 	zero 	zero 	zero 	zero 	zero 	};
+let	ivmm62	=	{	zero 	zero 	zero    zero 	zero 	zero 	zero 	};
+let	ivmm63	=	{	ageNew3 zero 	incg3   incg4   urbDum 	zero 	zone 	};
+let	ivmm64	=	{	zero 	incg2 	zero   	zero    zero 	zero 	zero 	};
+let	ivmm65	=	{	zero 	zero	zero    zero   	zero 	urbDum 	zero 	};
+
+@THIS IS FOR SOCIAL RECREATION TOUR@
+let	ivmm71	=	{	zero    zero	zero 	zero  	};
+let	ivmm72	=	{	zero   	zero 	zero 	zero  	};
+let	ivmm73	=	{	male    incg2   drvDum 	zero  	};
+let	ivmm74	=	{	zero   	zero 	zero 	urbDum  };
+let	ivmm75	=	{	zero   	zero 	zero 	zero 	};
+
+
+{ vm11,ivmmt11 } = indices(dataset,ivmm11');
+{ vm12,ivmmt12 } = indices(dataset,ivmm12');
+{ vm13,ivmmt13 } = indices(dataset,ivmm13');
+{ vm14,ivmmt14 }   = indices(dataset,ivmm14');
+{ vm15,ivmmt15 }   = indices(dataset,ivmm15');
+{ vm16,ivmmt16 }   = indices(dataset,ivmm16');
+{ vm17,ivmmt17 }   = indices(dataset,ivmm17');
+{ vm18,ivmmt18 }   = indices(dataset,ivmm18');
+{ vm19,ivmmt19 }   = indices(dataset,ivmm19');
+
+{ vm21,ivmmt21 } = indices(dataset,ivmm21');
+{ vm22,ivmmt22 } = indices(dataset,ivmm22');
+{ vm23,ivmmt23 } = indices(dataset,ivmm23');
+{ vm24,ivmmt24 }   = indices(dataset,ivmm24');
+{ vm25,ivmmt25 }   = indices(dataset,ivmm25');
+{ vm26,ivmmt26 }   = indices(dataset,ivmm26');
+{ vm27,ivmmt27 }   = indices(dataset,ivmm27');
+{ vm28,ivmmt28 }   = indices(dataset,ivmm28');
+
+{ vm31,ivmmt31 } = indices(dataset,ivmm31');
+{ vm32,ivmmt32 } = indices(dataset,ivmm32');
+{ vm33,ivmmt33 } = indices(dataset,ivmm33');
+{ vm34,ivmmt34 }   = indices(dataset,ivmm34');
+{ vm35,ivmmt35 }   = indices(dataset,ivmm35');
+{ vm36,ivmmt36 }   = indices(dataset,ivmm36');
+{ vm37,ivmmt37 }   = indices(dataset,ivmm37');
+
+{ vm41,ivmmt41 } = indices(dataset,ivmm41');
+{ vm42,ivmmt42 } = indices(dataset,ivmm42');
+{ vm43,ivmmt43 } = indices(dataset,ivmm43');
+{ vm44,ivmmt44 }   = indices(dataset,ivmm44');
+{ vm45,ivmmt45 }   = indices(dataset,ivmm45');
+{ vm46,ivmmt46 }   = indices(dataset,ivmm46');
+
+
+{ vm51,ivmmt51 } = indices(dataset,ivmm51');
+{ vm52,ivmmt52 } = indices(dataset,ivmm52');
+{ vm53,ivmmt53 } = indices(dataset,ivmm53');
+{ vm54,ivmmt54 }   = indices(dataset,ivmm54');
+{ vm55,ivmmt55 }   = indices(dataset,ivmm55');
+
+
+{ vm61,ivmmt61 } = indices(dataset,ivmm61');
+{ vm62,ivmmt62 } = indices(dataset,ivmm62');
+{ vm63,ivmmt63 } = indices(dataset,ivmm63');
+{ vm64,ivmmt64 }   = indices(dataset,ivmm64');
+{ vm65,ivmmt65 }   = indices(dataset,ivmm65');
+
+
+{ vm71,ivmmt71 } = indices(dataset,ivmm71');
+{ vm72,ivmmt72 } = indices(dataset,ivmm72');
+{ vm73,ivmmt73 } = indices(dataset,ivmm73');
+{ vm74,ivmmt74 }   = indices(dataset,ivmm74');
+{ vm75,ivmmt75 }   = indices(dataset,ivmm75');
+
+
+/*******END OF DEFINITION OF BASSELINE UTILITY FOR TOP AND BOTTOM NEST*************************/
+
+
+/* In the following specification, ivd1, ivd2, ivd3 contain input data specifications (on right hand side) for satiation parameters (Alphas) for alternatives 1, 2 and 3
+   Add a row below for ivd4 if there is a 4th alternative, another additional row for ivd5 if there is a 5th alternative,.... (number of rows = number of alternatives)
+   Number of columns = Number of alternatives.
+   Note that you can also add individual-specific variables below, so that satiation varies across individuals; However, you will then have to translate outputs to compute actual alpha parameters.
+   This code is written to provide you with the alpha parameters directly for the case when there is no variation in alpha across individuals */
+
+@THIS IS FOR THE TOP NEST@
+
+let	ivd1	=	{	uno 	zero	zero	zero	zero 	zero 	zero 	zero };
+let	ivd2	=	{	zero	uno 	zero	zero	zero 	zero 	zero 	zero };
+let	ivd3	=	{	zero	zero	uno 	zero	zero 	zero 	zero 	zero };
+let	ivd4	=	{	zero	zero	zero	uno	    zero 	zero 	zero 	zero };
+let	ivd5	=	{	zero	zero	zero	zero	uno	 	zero 	zero 	zero };
+let	ivd6	=	{	zero	zero	zero 	zero	zero 	uno 	zero 	zero };
+let	ivd7	=	{	zero	zero	zero	zero	zero 	zero 	uno 	zero };
+let	ivd8	=	{	zero	zero	zero	zero	zero	zero 	zero 	uno };
+
+/*Alpha = 1-exp(Delta) if Alpha < 1
+Alpha = 1-(1/(1+exp(Delta))) if 0 < Alpha < 1   */
+//Add a row for w4 below if there is a 4th alternative,..... (number of rows = number of alternatives)
+
+{ w1,ivdt1 }   = indices(dataset,ivd1');
+{ w2,ivdt2 }   = indices(dataset,ivd2');
+{ w3,ivdt3 }   = indices(dataset,ivd3');
+{ w4,ivdt4 }   = indices(dataset,ivd4');
+{ w5,ivdt5 }   = indices(dataset,ivd5');
+{ w6,ivdt6 }   = indices(dataset,ivd6');
+{ w7,ivdt7 }   = indices(dataset,ivd7');
+{ w8,ivdt8 }   = indices(dataset,ivd8');
+
+
+/********DEFINE ivd FOR THE BOTTOM NESTS********************************************/
+
+@WORK NEST@
+let	ivd11	=	{	uno 	zero	zero	zero	zero 	zero 	zero 	zero  zero };
+let	ivd12	=	{	zero	uno 	zero	zero	zero 	zero 	zero 	zero  zero };
+let	ivd13	=	{	zero	zero	uno 	zero	zero 	zero 	zero 	zero  zero };
+let	ivd14	=	{	zero	zero	zero	uno	    zero 	zero 	zero 	zero  zero };
+let	ivd15	=	{	zero	zero	zero	zero	uno	 	zero 	zero 	zero  zero };
+let	ivd16	=	{	zero	zero	zero 	zero	zero 	uno 	zero 	zero  zero };
+let	ivd17	=	{	zero	zero	zero	zero	zero 	zero 	uno 	zero  zero };
+let	ivd18	=	{	zero	zero	zero	zero	zero	zero 	zero 	uno   zero };
+let	ivd19	=	{	zero	zero	zero	zero	zero	zero 	zero 	zero  uno };
+
+@SCHOOL NEST@
+let	ivd21	=	{	uno 	zero	zero	zero	zero 	zero 	zero 	zero  };
+let	ivd22	=	{	zero	uno 	zero	zero	zero 	zero 	zero 	zero  };
+let	ivd23	=	{	zero	zero	uno 	zero	zero 	zero 	zero 	zero  };
+let	ivd24	=	{	zero	zero	zero	uno	    zero 	zero 	zero 	zero  };
+let	ivd25	=	{	zero	zero	zero	zero	uno	 	zero 	zero 	zero  };
+let	ivd26	=	{	zero	zero	zero 	zero	zero 	uno 	zero 	zero  };
+let	ivd27	=	{	zero	zero	zero	zero	zero 	zero 	uno 	zero  };
+let	ivd28	=	{	zero	zero	zero	zero	zero	zero 	zero 	uno   };
+
+@Escort@
+let	ivd31	=	{	uno 	zero	zero	zero	zero 	zero 	zero 	};
+let	ivd32	=	{	zero	uno 	zero	zero	zero 	zero 	zero 	};
+let	ivd33	=	{	zero	zero	uno 	zero	zero 	zero 	zero 	};
+let	ivd34	=	{	zero	zero	zero	uno	    zero 	zero 	zero 	};
+let	ivd35	=	{	zero	zero	zero	zero	uno	 	zero 	zero 	};
+let	ivd36	=	{	zero	zero	zero 	zero	zero 	uno 	zero 	};
+let	ivd37	=	{	zero	zero	zero	zero	zero 	zero 	uno 	};
+
+@PERSONAL BUSINESS@
+let	ivd41	=	{	uno 	zero	zero	zero	zero 	zero 	};
+let	ivd42	=	{	zero	uno 	zero	zero	zero 	zero 	};
+let	ivd43	=	{	zero	zero	uno 	zero	zero 	zero 	};
+let	ivd44	=	{	zero	zero	zero	uno	    zero 	zero 	};
+let	ivd45	=	{	zero	zero	zero	zero	uno	 	zero 	};
+let	ivd46	=	{	zero	zero	zero 	zero	zero 	uno 	};
+
+@SHOPPING@
+let	ivd51	=	{	uno 	zero	zero	zero	zero 	};
+let	ivd52	=	{	zero	uno 	zero	zero	zero 	};
+let	ivd53	=	{	zero	zero	uno 	zero	zero 	};
+let	ivd54	=	{	zero	zero	zero	uno	    zero 	};
+let	ivd55	=	{	zero	zero	zero	zero	uno	 	};
+
+@MEAL@
+let	ivd61	=	{	uno 	zero	zero	zero	zero 	};
+let	ivd62	=	{	zero	uno 	zero	zero	zero 	};
+let	ivd63	=	{	zero	zero	uno 	zero	zero 	};
+let	ivd64	=	{	zero	zero	zero	uno	    zero 	};
+let	ivd65	=	{	zero	zero	zero	zero	uno	 	};
+
+@SOCIAL RECREATION@
+let	ivd71	=	{	uno 	zero	zero	zero	zero 	};
+let	ivd72	=	{	zero	uno 	zero	zero	zero 	};
+let	ivd73	=	{	zero	zero	uno 	zero	zero 	};
+let	ivd74	=	{	zero	zero	zero	uno	    zero 	};
+let	ivd75	=	{	zero	zero	zero	zero	uno	 	};
+
+@Work@
+{ w11,ivdt11 }   = indices(dataset,ivd11');
+{ w12,ivdt12 }   = indices(dataset,ivd12');
+{ w13,ivdt13 }   = indices(dataset,ivd13');
+{ w14,ivdt14 }   = indices(dataset,ivd14');
+{ w15,ivdt15 }   = indices(dataset,ivd15');
+{ w16,ivdt16 }   = indices(dataset,ivd16');
+{ w17,ivdt17 }   = indices(dataset,ivd17');
+{ w18,ivdt18 }   = indices(dataset,ivd18');
+{ w19,ivdt19 }   = indices(dataset,ivd19');
+
+@School@
+{ w21,ivdt21 }   = indices(dataset,ivd21');
+{ w22,ivdt22 }   = indices(dataset,ivd22');
+{ w23,ivdt23 }   = indices(dataset,ivd23');
+{ w24,ivdt24 }   = indices(dataset,ivd24');
+{ w25,ivdt25 }   = indices(dataset,ivd25');
+{ w26,ivdt26 }   = indices(dataset,ivd26');
+{ w27,ivdt27 }   = indices(dataset,ivd27');
+{ w28,ivdt28 }   = indices(dataset,ivd28');
+
+@Escort@
+{ w31,ivdt31 }   = indices(dataset,ivd31');
+{ w32,ivdt32 }   = indices(dataset,ivd32');
+{ w33,ivdt33 }   = indices(dataset,ivd33');
+{ w34,ivdt34 }   = indices(dataset,ivd34');
+{ w35,ivdt35 }   = indices(dataset,ivd35');
+{ w36,ivdt36 }   = indices(dataset,ivd36');
+{ w37,ivdt37 }   = indices(dataset,ivd37');
+
+@Personal Business@
+{ w41,ivdt41 }   = indices(dataset,ivd41');
+{ w42,ivdt42 }   = indices(dataset,ivd42');
+{ w43,ivdt43 }   = indices(dataset,ivd43');
+{ w44,ivdt44 }   = indices(dataset,ivd44');
+{ w45,ivdt45 }   = indices(dataset,ivd45');
+{ w46,ivdt46 }   = indices(dataset,ivd46');
+
+@Shopping@
+{ w51,ivdt51 }   = indices(dataset,ivd51');
+{ w52,ivdt52 }   = indices(dataset,ivd52');
+{ w53,ivdt53 }   = indices(dataset,ivd53');
+{ w54,ivdt54 }   = indices(dataset,ivd54');
+{ w55,ivdt55 }   = indices(dataset,ivd55');
+
+@Meal@
+{ w61,ivdt61 }   = indices(dataset,ivd61');
+{ w62,ivdt62 }   = indices(dataset,ivd62');
+{ w63,ivdt63 }   = indices(dataset,ivd63');
+{ w64,ivdt64 }   = indices(dataset,ivd64');
+{ w65,ivdt65 }   = indices(dataset,ivd65');
+
+@Social Recreation@
+{ w71,ivdt71 }   = indices(dataset,ivd71');
+{ w72,ivdt72 }   = indices(dataset,ivd72');
+{ w73,ivdt73 }   = indices(dataset,ivd73');
+{ w74,ivdt74 }   = indices(dataset,ivd74');
+{ w75,ivdt75 }   = indices(dataset,ivd75');
+
+
+/*********************END OF DEFINITION OF ivd FOR THE BOTTOM NESTS***************************************/
+
+/* In the following specification, ivg1, ivg2, ivg3 contain input data specifications (on the right hand side) for translation parameters (Gammas) for alternatives 1, 2 and 3
+   Add a row for ivg4 if there is a 4th alternative another additional row for ivd5 if there is a 5th alternative,.... (number of rows = number of alternatives)
+   Number of columns = Number of alternatives; Note that you can also add individual-specific variables below, so that gamma varies across individuals
+   However, you will then have to translate outputs to compute actual gamma parameters
+   This code is written to provide you with the gamma parameters directly for the case when there is no variation in gamma across individuals */
+
+@Top nest@
+let	ivg1	=	{	uno 	zero	zero	zero	zero 	zero 	zero 	zero 	zero	zero 	zero 	zero 	zero 	zero 	zero  	zero  	zero  	zero  zero  zero		zero	zero 	zero 	zero 	zero  	zero 	zero	zero	zero	zero 	zero 	zero };
+let	ivg2	=	{	zero	uno 	zero	zero	zero 	zero 	zero 	zero 	male	zero 	zero 	zero 	age1 	zero 	ageNew2 zero  	zero  	zero  zero  wPrtDum		zero	urbDum 	zero 	zero 	zero  	zero 	zone	zero	zero	zero 	zero 	zero };
+let	ivg3	=	{	zero	zero	uno 	zero	zero 	zero 	zero 	zero 	zero	zero 	zero 	zero 	zero 	age1 	zero  	zero  	zero  	zero  zero  zero		zero	zero 	zero 	zero 	zero  	zero 	zero	zone	zero	zero 	zero 	zero };
+let	ivg4	=	{	zero	zero	zero	uno	    zero 	zero 	zero 	zero 	zero	zero 	zero 	zero 	zero 	zero 	zero  	ageNew2 zero  	incg2 zero  zero		zero	zero 	zero 	zero 	zero  	zero 	zero	zero	zone	zero 	zero 	zero };
+let	ivg5	=	{	zero	zero	zero	zero	uno	 	zero 	zero 	zero 	zero	male 	zero 	zero 	zero 	zero 	zero  	zero  	zero  	zero  zero  zero		wPrtDum	zero 	urbDum 	zero 	zero  	zero 	zero	zero	zero	zero 	zero 	zero };
+let	ivg6	=	{	zero	zero	zero 	zero	zero 	uno 	zero 	zero 	zero	zero 	male 	zero 	zero 	zero 	zero  	zero  	ageNew2 zero  zero  zero		zero	zero 	zero 	urbDum 	zero  	zero 	zero	zero	zero	zone 	zero 	zero };
+let	ivg7	=	{	zero	zero	zero	zero	zero 	zero 	uno 	zero 	zero	zero 	zero 	male 	zero 	zero 	zero  	zero  	zero  	zero  incg4 zero		zero	zero 	zero 	zero 	zero  	zero 	zero	zero	zero	zero 	zone 	zero };
+let	ivg8	=	{	zero	zero	zero	zero	zero	zero 	zero 	uno 	zero	zero 	zero 	zero 	zero 	zero 	zero  	zero  	zero  	zero  zero  zero		zero	zero 	zero 	zero 	urbDum 	frday 	zero	zero	zero	zero 	zero 	zone };
+
+
+//Add a row for u4 below if there is a 4th alternative,... (number of rows = number of alternatives)
+{ u1,ivgt1 }   = indices(dataset,ivg1');
+{ u2,ivgt2 }   = indices(dataset,ivg2');
+{ u3,ivgt3 }   = indices(dataset,ivg3');
+{ u4,ivgt4 }   = indices(dataset,ivg4');
+{ u5,ivgt5 }   = indices(dataset,ivg5');
+{ u6,ivgt6 }   = indices(dataset,ivg6');
+{ u7,ivgt7 }   = indices(dataset,ivg7');
+{ u8,ivgt8 }   = indices(dataset,ivg8');
+
+
+/********DEFINITION OF ivg FOR THE BOTTOM NESTS*************************************/
+@WORK@
+let	ivg11	=	{	uno 	zero	zero	zero	zero 	zero 	zero 	zero 	zero  	zero	zero	zero 	zero 	zero		zero	zero		};
+let	ivg12	=	{	zero	uno 	zero	zero	zero 	zero 	zero 	zero 	zero 	zero	zero	zero 	zero 	zero		zero	zero		};
+let	ivg13	=	{	zero	zero	uno 	zero	zero 	zero 	zero 	zero 	zero    zero	zero	zero 	zero 	zero		zero	zero		};
+let	ivg14	=	{	zero	zero	zero	uno	    zero 	zero 	zero 	zero 	zero    male	zero	zero 	zero 	frday		zero	zero		};
+let	ivg15	=	{	zero	zero	zero	zero	uno	 	zero 	zero 	zero 	zero    zero	incg2	zero 	zero 	zero		zero	zero		};
+let	ivg16	=	{	zero	zero	zero 	zero	zero 	uno 	zero 	zero 	zero    zero	zero	incg2 	zero 	zero		zero	zero		};
+let	ivg17	=	{	zero	zero	zero	zero	zero 	zero 	uno 	zero 	zero    zero	zero	zero 	zero 	zero		zero	zone		};
+let	ivg18	=	{	zero	zero	zero	zero	zero	zero 	zero 	uno 	zero    zero	zero	zero 	incg2 	zero		zero	zero		};
+let	ivg19	=	{	zero	zero	zero	zero	zero	zero 	zero 	zero 	uno     zero	zero	zero 	zero 	zero		frday	zero		};
+
+
+@SCHOOL@
+let	ivg21	=	{	uno 	zero	zero	zero	zero 	zero 	zero 	zero 	zero	zero	zero 	};
+let	ivg22	=	{	zero	uno 	zero	zero	zero 	zero 	zero 	zero 	zero	zero	zero 	};
+let	ivg23	=	{	zero	zero	uno 	zero	zero 	zero 	zero 	zero 	male	zero	zero 	};
+let	ivg24	=	{	zero	zero	zero	uno	    zero 	zero 	zero 	zero 	zero	zero	zero 	};
+let	ivg25	=	{	zero	zero	zero	zero	uno	 	zero 	zero 	zero 	zero	zero	zero 	};
+let	ivg26	=	{	zero	zero	zero 	zero	zero 	uno 	zero 	zero 	zero	zero	zero 	};
+let	ivg27	=	{	zero	zero	zero	zero	zero 	zero 	uno 	zero 	zero	male	zero 	};
+let	ivg28	=	{	zero	zero	zero	zero	zero	zero 	zero 	uno 	zero	zero	male 	};
+
+@ESCORT@
+let	ivg31	=	{	uno 	zero	zero	zero	zero 	zero 	zero 	zero	zero 	};
+let	ivg32	=	{	zero	uno 	zero	zero	zero 	zero 	zero 	zero	zero 	};
+let	ivg33	=	{	zero	zero	uno 	zero	zero 	zero 	zero 	male	zero 	};
+let	ivg34	=	{	zero	zero	zero	uno	    zero 	zero 	zero 	zero	zero 	};
+let	ivg35	=	{	zero	zero	zero	zero	uno	 	zero 	zero 	zero	zero 	};
+let	ivg36	=	{	zero	zero	zero 	zero	zero 	uno 	zero 	zero	male 	};
+let	ivg37	=	{	zero	zero	zero	zero	zero 	zero 	uno 	zero	zero 	};
+
+@PERSONAL BUSINESS@
+let	ivg41	=	{	uno 	zero	zero	zero	zero 	zero    zero	zero	zero 	zero 	zero 	};
+let	ivg42	=	{	zero	uno 	zero	zero	zero 	zero 	zero	zero	zero 	zero 	zero 	};
+let	ivg43	=	{	zero	zero	uno 	zero	zero 	zero 	male	zero	zero 	zero 	zero 	};
+let	ivg44	=	{	zero	zero	zero	uno	    zero 	zero 	zero	zero	zero 	zero 	frday   };
+let	ivg45	=	{	zero	zero	zero	zero	uno	 	zero 	zero	male	age1 	ageNew2 zero 	};
+let	ivg46	=	{	zero	zero	zero 	zero	zero 	uno 	zero	zero	zero 	zero 	zero 	};
+
+@SHOP@
+let	ivg51	=	{	uno 	zero	zero	zero	zero 	};
+let	ivg52	=	{	zero	uno 	zero	zero	zero 	};
+let	ivg53	=	{	zero	zero	uno 	zero	zero 	};
+let	ivg54	=	{	zero	zero	zero	uno	    zero 	};
+let	ivg55	=	{	zero	zero	zero	zero	uno	 	};
+
+@MEAL@
+let	ivg61	=	{	uno 	zero	zero	zero	zero 	};
+let	ivg62	=	{	zero	uno 	zero	zero	zero 	};
+let	ivg63	=	{	zero	zero	uno 	zero	zero 	};
+let	ivg64	=	{	zero	zero	zero	uno	    zero 	};
+let	ivg65	=	{	zero	zero	zero	zero	uno	 	};
+
+
+@SOCIAL RECREATION@
+let	ivg71	=	{	uno 	zero	zero	zero	zero 	zero	zero	zero  	zero  	zero  	zero  	 };
+let	ivg72	=	{	zero	uno 	zero	zero	zero 	zero	zero	zero  	zero  	zero  	zero  	 };
+let	ivg73	=	{	zero	zero	uno 	zero	zero 	male	zero	ageNew3 incg2  	incg4  	frday  	 };
+let	ivg74	=	{	zero	zero	zero	uno	    zero 	zero	zero	zero  	zero  	zero  	zero  	 };
+let	ivg75	=	{	zero	zero	zero	zero	uno	 	zero	male	zero  	zero  	zero  	zero  	 };
+
+
+@WORK Tour@
+{ u11,ivgt11 }   = indices(dataset,ivg11');
+{ u12,ivgt12 }   = indices(dataset,ivg12');
+{ u13,ivgt13 }   = indices(dataset,ivg13');
+{ u14,ivgt14 }   = indices(dataset,ivg14');
+{ u15,ivgt15 }   = indices(dataset,ivg15');
+{ u16,ivgt16 }   = indices(dataset,ivg16');
+{ u17,ivgt17 }   = indices(dataset,ivg17');
+{ u18,ivgt18 }   = indices(dataset,ivg18');
+{ u19,ivgt19 }   = indices(dataset,ivg19');
+
+@SCHOOL@
+{ u21,ivgt21 }   = indices(dataset,ivg21');
+{ u22,ivgt22 }   = indices(dataset,ivg22');
+{ u23,ivgt23 }   = indices(dataset,ivg23');
+{ u24,ivgt24 }   = indices(dataset,ivg24');
+{ u25,ivgt25 }   = indices(dataset,ivg25');
+{ u26,ivgt26 }   = indices(dataset,ivg26');
+{ u27,ivgt27 }   = indices(dataset,ivg27');
+{ u28,ivgt28 }   = indices(dataset,ivg28');
+
+@ESCORT@
+{ u31,ivgt31 }   = indices(dataset,ivg31');
+{ u32,ivgt32 }   = indices(dataset,ivg32');
+{ u33,ivgt33 }   = indices(dataset,ivg33');
+{ u34,ivgt34 }   = indices(dataset,ivg34');
+{ u35,ivgt35 }   = indices(dataset,ivg35');
+{ u36,ivgt36 }   = indices(dataset,ivg36');
+{ u37,ivgt37 }   = indices(dataset,ivg37');
+
+@PERSONAL BUSINESS@
+{ u41,ivgt41 }   = indices(dataset,ivg41');
+{ u42,ivgt42 }   = indices(dataset,ivg42');
+{ u43,ivgt43 }   = indices(dataset,ivg43');
+{ u44,ivgt44 }   = indices(dataset,ivg44');
+{ u45,ivgt45 }   = indices(dataset,ivg45');
+{ u46,ivgt46 }   = indices(dataset,ivg46');
+
+@SHOP@
+{ u51,ivgt51 }   = indices(dataset,ivg51');
+{ u52,ivgt52 }   = indices(dataset,ivg52');
+{ u53,ivgt53 }   = indices(dataset,ivg53');
+{ u54,ivgt54 }   = indices(dataset,ivg54');
+{ u55,ivgt55 }   = indices(dataset,ivg55');
+
+@MEAL@
+{ u61,ivgt61 }   = indices(dataset,ivg61');
+{ u62,ivgt62 }   = indices(dataset,ivg62');
+{ u63,ivgt63 }   = indices(dataset,ivg63');
+{ u64,ivgt64 }   = indices(dataset,ivg64');
+{ u65,ivgt65 }   = indices(dataset,ivg65');
+
+@SOCIAL RECREATION@
+{ u71,ivgt71 }   = indices(dataset,ivg71');
+{ u72,ivgt72 }   = indices(dataset,ivg72');
+{ u73,ivgt73 }   = indices(dataset,ivg73');
+{ u74,ivgt74 }   = indices(dataset,ivg74');
+{ u75,ivgt75 }   = indices(dataset,ivg75');
+
+/*********END OF DEFINITION OF ivg FOR THE BOTTOM NESTS******************/
+
+ivmt = ivmt1'~ivmt2'~ivmt3'~ivmt4'~ivmt5'~ivmt6'~ivmt7'~ivmt8';  // TOP LEVEL
+ivdt = ivdt1'~ivdt2'~ivdt3'~ivdt4'~ivdt5'~ivdt6'~ivdt7'~ivdt8';  // TOP LEVEL
+ivgt = ivgt1'~ivgt2'~ivgt3'~ivgt4'~ivgt5'~ivgt6'~ivgt7'~ivgt8';  // TOP LEVEL
+
+
+/************DEFINITION FOR THE BOTTOM NEST**********/
+ivmb1 = ivmt11'~ivmt12'~ivmt13'~ivmt14'~ivmt15'~ivmt16'~ivmt17'~ivmt18'~ivmt19';  // WORK TOUR
+ivmb2 = ivmt21'~ivmt22'~ivmt23'~ivmt24'~ivmt25'~ivmt26'~ivmt27'~ivmt28';        // SCHOOL TOUR
+ivmb3 = ivmt31'~ivmt32'~ivmt33'~ivmt34'~ivmt35'~ivmt36'~ivmt37';        // ESCORT TOUR
+ivmb4 = ivmt41'~ivmt42'~ivmt43'~ivmt44'~ivmt45'~ivmt46';		// PERSONAL BUSINESS
+ivmb5 = ivmt51'~ivmt52'~ivmt53'~ivmt54'~ivmt55';		// SHOP
+ivmb6 = ivmt61'~ivmt62'~ivmt63'~ivmt64'~ivmt65';		// MEAL
+ivmb7 = ivmt71'~ivmt72'~ivmt73'~ivmt74'~ivmt75';		// SOCIAL RECREATION
+
+ivmb = ivmb1~ivmb2~ivmb3~ivmb4~ivmb5~ivmb6~ivmb7;  //print "ivmb: " ivmb;
+
+
+/*******************DEFINITION OF THE BOTTOM NEST FOR THE TOP NEST************************/
+ivmmb1 = ivmmt11'~ivmmt12'~ivmmt13'~ivmmt14'~ivmmt15'~ivmmt16'~ivmmt17'~ivmmt18'~ivmmt19';  // WORK TOUR
+ivmmb2 = ivmmt21'~ivmmt22'~ivmmt23'~ivmmt24'~ivmmt25'~ivmmt26'~ivmmt27'~ivmmt28';        // SCHOOL TOUR
+ivmmb3 = ivmmt31'~ivmmt32'~ivmmt33'~ivmmt34'~ivmmt35'~ivmmt36'~ivmmt37';        // ESCORT TOUR
+ivmmb4 = ivmmt41'~ivmmt42'~ivmmt43'~ivmmt44'~ivmmt45'~ivmmt46';		// PERSONAL BUSINESS
+ivmmb5 = ivmmt51'~ivmmt52'~ivmmt53'~ivmmt54'~ivmmt55';		// SHOP
+ivmmb6 = ivmmt61'~ivmmt62'~ivmmt63'~ivmmt64'~ivmmt65';		// MEAL
+ivmmb7 = ivmmt71'~ivmmt72'~ivmmt73'~ivmmt74'~ivmmt75';		// SOCIAL RECREATION
+
+ivmmb = ivmmb1~ivmmb2~ivmmb3~ivmmb4~ivmmb5~ivmmb6~ivmmb7;  //print "ivmb: " ivmb;
+/************END OF BOTTOM NEST DEFINITION FOR TOP NEST*************/
+
+ivdb1 = ivdt11'~ivdt12'~ivdt13'~ivdt14'~ivdt15'~ivdt16'~ivdt17'~ivdt18'~ivdt19';  	// WORK TOUR
+ivdb2 = ivdt21'~ivdt22'~ivdt23'~ivdt24'~ivdt25'~ivdt26'~ivdt27'~ivdt28';  			// SCHOOL TOUR
+ivdb3 = ivdt31'~ivdt32'~ivdt33'~ivdt34'~ivdt35'~ivdt36'~ivdt37';  					// ESCORT
+ivdb4 = ivdt41'~ivdt42'~ivdt43'~ivdt44'~ivdt45'~ivdt46';  							// PERSONAL BUSINESS
+ivdb5 = ivdt51'~ivdt52'~ivdt53'~ivdt54'~ivdt55';  									// SHOP
+ivdb6 = ivdt61'~ivdt62'~ivdt63'~ivdt64'~ivdt65';  									// MEAL
+ivdb7 = ivdt71'~ivdt72'~ivdt73'~ivdt74'~ivdt75';  									// SOCIAL RECREATION
+
+ivdb = ivdb1~ivdb2~ivdb3~ivdb4~ivdb5~ivdb6~ivdb7;  //print "ivdb: " ivdb;
+
+ivgb1 = ivgt11'~ivgt12'~ivgt13'~ivgt14'~ivgt15'~ivgt16'~ivgt17'~ivgt18'~ivgt19';    // WORK
+ivgb2 = ivgt21'~ivgt22'~ivgt23'~ivgt24'~ivgt25'~ivgt26'~ivgt27'~ivgt28';			// SCHOOL
+ivgb3 = ivgt31'~ivgt32'~ivgt33'~ivgt34'~ivgt35'~ivgt36'~ivgt37';					// ESCORT
+ivgb4 = ivgt41'~ivgt42'~ivgt43'~ivgt44'~ivgt45'~ivgt46';							// PERSONAL BUSINESS
+ivgb5 = ivgt51'~ivgt52'~ivgt53'~ivgt54'~ivgt55';									// SHOP
+ivgb6 = ivgt61'~ivgt62'~ivgt63'~ivgt64'~ivgt65';									// MEAL
+ivgb7 = ivgt71'~ivgt72'~ivgt73'~ivgt74'~ivgt75';									// SOCIAL RECREATION
+
+ivgb = ivgb1~ivgb2~ivgb3~ivgb4~ivgb5~ivgb6~ivgb7;  //print "ivgb: " ivgb;
+
+/**********************END OF DEFINITION ***********************************/
+
+nvarmt = cols(ivm1);     // number of variables in baseline utility   = number of columns in ivm1, do not modify this
+nvardelt = cols(ivd1);   // number of variables in satiation          = number of columns in ivd1, do not modify this
+nvargamt = cols(ivg1);   // number of variables in translation        = number of columns in ivg1, do not modify this
+
+/********Definition for the bottom nests***********************/
+nvarmb = cols(ivm11)|cols(ivm21)|cols(ivm31)|cols(ivm41)|cols(ivm51)|cols(ivm61)|cols(ivm71); 	// Number of all baseline parameters in the bottom nests
+nvardelb = cols(ivd11)|cols(ivd21)|cols(ivd31)|cols(ivd41)|cols(ivd51)|cols(ivd61)|cols(ivd71); // Number of all alpha parameters in the bottom nests
+nvargamb = cols(ivg11)|cols(ivg21)|cols(ivg31)|cols(ivg41)|cols(ivg51)|cols(ivg61)|cols(ivg71); // Number of all gamma parameters in the bottom nests
+
+nvarmmb = cols(ivmm11)|cols(ivmm21)|cols(ivmm31)|cols(ivmm41)|cols(ivmm51)|cols(ivmm61)|cols(ivmm71); 	// Number of all baseline parameters in the bottom nests
+
+/******END OF DEFINITION OF NUMBER OF PARAMETERS IN THE BOTTOM NEST ********************/
+
+/*******CREATE CONSBOT THAT WILL HOLD THE NUMBER OF CONSTANTS IN EACH OF THE BOTTOM NESTS**************/
+consBot = {};  //consBot will hold the number of constants in the bottom nests
+for i ((numout_top+1),nc_top,1);
+	consBot = consBot|(nc_bot[i]-1); // Each element holds the number of constants in the respective bottom nest
+endfor;
+
+// Associating columns with variable names
+flagchmFull = f'; //print "flagchm: " flagchm; //flagchm constains pointer to column number for both top nest and bottom nests
+
+/**********************************END OF DEFINITION**************************************************/
+
+// Define parameters to be passed to the main function
+b_top = { -6.787	-12.5	-10.5162	-9.0448	-9.4115	-9.5119	-9.2694 //Cons
+			0.3767	-0.3726 //gender
+			0.3175	2.8051	-0.6817	0.0873 // age group 1
+			0.2757	1.1558	0.7672	-0.456  // age group 2
+				-0.2712 //age  group 3
+			0.1184	0.2869	0.2545 // Income group 2
+			-0.1976	-0.3507	0.3476	0.4567 // Income group 3
+			-0.4341	0.4143	0.3902	// Income group 4
+			0.1917	0.2129	0.1618// urban dummy
+			-0.3759	0.3388	0.4472	0.1387 // Friday dummy
+			-1.0587	1.8586	0.4938	0.4332	0.1888	0.3529  // Part time dummy
+			-0.3121 // Zonal dummy
+		};
+		
+b_top = b_top';
+
+@Work Tour@
+b_bot1 = { //-3.1054	-8.2913	-8.654	-7.9086	-7.8288	-7.8035	-7.9877	-8.254 //Cons
+			-0.5286	-0.9554	-0.9722	-0.5288	-0.2209 //gender
+			 -0.2064	4.4137	1.5659	-1.4097	-0.7447	-0.3335  // Age 1			 
+			-0.1414		2.1454	-0.9694	-0.4074	-0.2209  // Age new 2
+			-0.6359	 // Age new 3
+			1.1937  // income group 2
+			0.1528	1.8427	0.2078	0.2398	0.4195  // income group 3
+			1.7518	0.6003	0.357  // income group 4
+			0.2808	0.4491	0.7496	0.2089	0.4933	0.3062  // flexible time dummy
+			0.7209	0.4155  // urban dummy
+			-0.6442	0.4351	0.6946  // Friday dummy
+			4.3579	2.0786	1.6559	1.318  // Driver dummy
+			-0.1503	-0.3479	-0.2138	-0.3092  // Area dummy
+			 };  
+
+b_bot1 = b_bot1';
+
+@School Tour@
+b_bot2 = { //-2.6972	-7.7911	-7.6615	-7.4827	-7.7773	-7.3801	-7.5616 //Cons
+			0.3971  // gender dummy
+			-0.6305	-0.8256	-1.1914  // Age 1 dummy
+			1.0857	0.8652	1.031	0.6304  // income group 3 dummy
+			-0.72  // urban area dummy
+			};  // 
+
+b_bot2 = b_bot2';
+
+@Escort Tour@
+b_bot3 = { //-0.7022	-4.8714	-5.1938	-4.2542	-4.5279	-4.8 //Cons
+			-0.6146	-0.6085	-0.4395	-0.3184  //gender
+			0.9855	0.2975	-0.4869  // Age 1
+			0.9773	-0.663  // Age new 2
+			0.908	-0.9205  // Age new 3
+			-1.0763	-0.7643	0.5761  // income group 2
+			0.345	-0.7118	0.6436  // income group 3
+			0.2399	-0.641	0.7218  // income group 4
+			0.5307	0.4181  // urban dummy
+			0.2911	-0.36  // Area dummy
+			  };  
+
+b_bot3 = b_bot3';
+
+@Personal Business Tour@
+b_bot4 = { //-1.3788	-5.479	-5.5629	-5.7019	-6.1382  //Constant
+			-0.3962	-0.2358	-0.3322  // gender dummy
+			-0.963	0.505  // age 1 dummy			
+			-0.3376	-0.2704	-0.398  // age new 2 
+			-0.5838	-0.5465  // age new 3
+			0.5108  // income group 2
+			0.5684	0.2974  // urban dummy
+			0.39	0.3378  // friday dummy
+			0.4168  // area dummy
+			  };  
+
+b_bot4 = b_bot4';
+
+@Shop Tour@
+b_bot5 = { //-1.4498	-5.1403	-7.1297	-6.2167 ///Constant
+			-1.3136  // age 1 dummy
+			-0.2807	-0.4794  // age new 2 dummy
+			-0.3972	-1.5678  // age new 3 dummy
+			0.2506	-0.4811  // income group 2
+			0.4529	0.2264  // income group 3
+			0.3351	0.4885  // income group 4
+			0.3658  // friday dummy
+			0.8516	// driver dummy
+		};  
+		
+b_bot5 = b_bot5';
+
+@Meal Tour@
+b_bot6 = { //-1.7273	-6.0962	-7.2697	-6.8748 //Constant
+			-1.2498  // age new 3
+			-0.7937	-0.5865	-0.7726  // income group
+			0.6405	0.9726  // urban dummy
+			0.6995  // area dummy
+		};    
+
+b_bot6 = b_bot6';
+
+@Social Recreation Tour@
+b_bot7 = { //-1.5181	-6.2893	-6.5324	-6.6599 //Constant
+			-0.1627  // gender dummy
+			0.3563  // income group 2 dummy
+			0.69	// driver dummy
+			0.8905  // urban dummy
+		};     
+
+b_bot7 = b_bot7';
+
+@These are the bottom nest parameters without the constants@
+b_bot = b_bot1|b_bot2|b_bot3|b_bot4|b_bot5|b_bot6|b_bot7;
+
+@THESE ARE THE BOTTOM NEST CONSTANTS@
+b_bot_const = { -3.0547	-13.5109	-15.4214	-11.8141	-9.4687	-11.6779	-12.5636	-12.244//Cons 1st bottom nest
+				-2.728	-12.3735	-7.6381	-12.1864	-5.6785	-7.4156	-7.8644		//Cons 2nd bottom nest
+				-0.7794	-4.5179	-5.9167	-3.7531	-3.7147	-5.7332			//Cons 3rd bottom nest
+				-1.3383	-6.017	-5.3196	-5.9685	-5.6234  //Constant 4th bottom nest
+				-1.4507	-5.8699	-13.2407	-5.3944 ///Constant 5th bottom nest
+				-1.7596	-6.8791	-13.0045	-6.7347 //Constant 6th bottom nest
+				-1.504	-6.8136	-6.8967	-9.7476 //Constant 7th bottom nest
+			};
+			
+b_bot_const = b_bot_const';			
+
+@END OF BETA SPECIFICATION@
+
+gam_top = { 5.7573	6.5659	4.1865	4.637	4.3768	5.0097	4.656   // Constants
+			0.1757	-0.1056	-0.1872	-0.2058  // Gender
+			-0.1999	-0.497	 // Age 1
+			-0.1516	-0.5642	-0.1357// Age new 2
+			0.4563 // income group 2
+			-0.2291 // income group 4
+			0.3352	0.236  // Part time dummy
+			-0.1033	-0.2205	-0.3694	-0.2972  // Urban dummy
+			0.3077	 // Friday dummy
+			0.1013	0.3487	0.3374	0.2331	0.2634	0.2682 // Zonal dummy 
+			};
+
+gam_top = -1000*ones(numout_top,1)|gam_top';  @Gamma for the outside good in the top nest needs to be fixed@
+
+// Here specifying other top nest gamma parameters
+/*gam_top_add = { -0.5176	-0.3369	-0.3862  // Male
+			-0.279	-0.2184	-0.3577  // Age  // Age1_work|AgeNew2_work|AgeNew2_shop
+			  };  // Additional individual specific parameters
+
+gam_top_add = gam_top_add';
+
+gam_top = gam_top|gam_top_add;
+*/
+
+@Work Tour@
+gam_bot1 = { 5.5096	5.1153	2.455	3.3412	2.8711	3.4174	4.4042 // constant
+			 1.3843	   // Gender - escort
+			-0.2955	-0.4144	-0.349   // income group
+			-1.8899	0.3769  // friday 
+			0.1774	  // zone
+};  //Again the serial is gamam in the 1st bottom, then 2nd bottom, then so on
+
+gam_bot1 = gam_bot1';
+
+@School Tour@
+gam_bot2 = { 4.5579	3.9063	4.2831	4.4771	4.5461	5.0299  //constants
+			 1.4044  -0.8562  1.3799  // gender
+			};
+
+gam_bot2 = gam_bot2';
+
+@Escort Tour@
+gam_bot3 = { 2.959	5.9363	4.4318	4.6455	7.7321  // Constant
+			  0.5645   0.6413 // gender
+			  };
+
+gam_bot3 = gam_bot3';
+
+@Personal Business Tour@
+gam_bot4 = { 3.793	4.0927	5.218	6.1029  // constants
+			 -0.4298  0.3735  // Gender
+			 -0.8981  -1.0783  // Age 1 , ageNew 2
+			 0.6096  // Friday dummy
+			 
+};
+
+gam_bot4 = gam_bot4';
+
+@Shop Tour@
+gam_bot5 = { 4.6581	6.3985	4.779 // Constants
+			//0.684  -1.4011  // Gender
+			//-1.2453  1.5254  // Urban indicator
+			};
+
+gam_bot5 = gam_bot5';
+
+@Meal Tour@
+gam_bot6 = { 3.99402	4.2231	6.6299 };
+
+gam_bot6 = gam_bot6';
+
+@Social Recreation Tour@
+gam_bot7 = { 3.7858	5.38	5.3995 // Gamma constants
+			 -0.5158  -0.7585  // Gender	
+			 0.7501  // Age new 3
+			 0.8314  // Income group 2
+			 //0.5777  // Income group 3
+			 1.2371  // Income group 4
+			 -0.7266   // Friday dummy
+	};
+
+gam_bot7 = gam_bot7';
+
+@Every bottom level model has 2 outside goods, for those goods the gamma is fixed to zero@
+gam_bot = -1000*ones(numout_bot,1)|gam_bot1|-1000*ones(numout_bot,1)|gam_bot2|
+			-1000*ones(numout_bot,1)|gam_bot3|-1000*ones(numout_bot,1)|gam_bot4|
+			-1000*ones(numout_bot,1)|gam_bot5|-1000*ones(numout_bot,1)|gam_bot6|-1000*ones(numout_bot,1)|gam_bot7;
+
+@END OF GAMMAA SPECIFICATION@
+//lambda_top = eye(nc_top); 
+
+@Non-iid errors actual parameters provided@
+lambda_top = { 1	
+			   0	1	
+			   0	-0.36777	1.4773	
+			   0	-0.5808		0		1.9262	
+			   0	-0.8934		-0.4131	0		1.4971	
+			   0	-0.754		 0		0		0		1.6888	
+			   0	-0.5579		 0		-0.3546	-0.4185	0		1.0017	
+			   0	-0.4666		 0		0		0		0		-0.6605		1.3535 };
+lambda_top = lambda_top';			   
+
+
+@DEFINE THE ALPHA PARAMETERS@
+//alpha_top = ones((nc_top-numout_top-1),1)|0;  @Starting values should not be zeros@
+alpha_top = 0.0394|0|0.0|0.0|0.0|0.0|0;  @Starting values should not be zeros@
+
+@For the outside good in the top nest, there is no bottom nest@
+@Each nc by nc diagonal carries@
+//lambda_bot = eye(sumc(nc_bot));  // For IID error
+
+@For heteroskedastic error@
+
+diag_bot_chol1 = { 1 		 0.3023  	1.8074    1.9152 	2.7787  2.9993  2.972  2.9391  2.6461 };  	diag_bot_chol1 = diag_bot_chol1'; // work
+diag_bot_chol2 = { 1         1    	 	1	      1.0  		1.0  	1.0  	1.0    1 };  		diag_bot_chol2 = diag_bot_chol2'; // school
+diag_bot_chol3 = { 0.7449    0.6252  	0.97      0.9136    0.9914  1.0661  1 };  			diag_bot_chol3 = diag_bot_chol3'; // escort
+diag_bot_chol4 = { 0.8726    0.6669  	1.5599    1.1597    1.1982  1  };  					diag_bot_chol4 = diag_bot_chol4'; // personal business
+diag_bot_chol5 = { 0.465     0.6062  	0.8187    0.7362    1	 };  							diag_bot_chol5 = diag_bot_chol5'; // shop
+diag_bot_chol6 = { 1.0       0.1  	 	1.6188    1.8545    0.9287 };  								diag_bot_chol6 = diag_bot_chol6'; // meal
+diag_bot_chol7 = { 0.73      1.0629   	0.9807    0.6501    1 };  								diag_bot_chol7 = diag_bot_chol7'; // social recreation
+				 
+
+diag_bot_chol = diag_bot_chol1|diag_bot_chol2|diag_bot_chol3|diag_bot_chol4|diag_bot_chol5|diag_bot_chol6|diag_bot_chol7;				   // This is the diagonal of the cholesky matrix
+
+lambda_bot_chol = { };
+
+for i((numout_top+1),nc_top,1);  // Since the outside good in the top nest does not have any bottom nests
+	if (i.==(numout_top+1));
+		lambda_bot_chol = lambda_bot_chol|vech(diagrv(eye(nc_bot[i]),diag_bot_chol[1:nc_bot[i]]));
+	else;
+		start = (sumc(nc_bot[1:i-1])+1);
+		end_ = (sumc(nc_bot[1:i]));
+		lambda_bot_chol = lambda_bot_chol|vech(diagrv(eye(nc_bot[i]),diag_bot_chol[start:end_]));
+	endif;
+endfor;
+
+@End of setting lambda_bot_chol for heetroskedastic error@
+
+/*************Now arracnge the beta parameters**********************/
+//bb = b_top|gam_top|vech(chol(lambda_top)'); //End of top nest parameter, not passing alpha, since it is fixed in gamma spec
+bb = b_top|gam_top|lambda_top; //Appending lambda top which is already the vector of choleskies
+
+bb = bb|alpha_top;  // ADDING THE ALPHA_TOP PARAMETERS
+
+@This lambda_bot_chol is for iid error@
+/*lambda_bot_chol = {};
+for i((numout_top+1),nc_top,1);  // Since the outside good in the top nest does not have any bottom nests
+	if (i.==(numout_top+1));
+		lambda_bot_chol = lambda_bot_chol|vech(chol(lambda_bot[1:nc_bot[i],1:nc_bot[i]])');
+	else;
+		lambda_bot_chol = lambda_bot_chol|vech(chol(lambda_bot[(sumc(nc_bot[1:(i-1)])+1):sumc(nc_bot[1:i]),(sumc(nc_bot[1:i-1])+1):sumc(nc_bot[1:i])])');
+	endif;
+endfor; //End of creation of lambda_bot_chol which is a column vector
+*/
+
+//bb = bb|b_bot;  @This specification is only for running the top nest model@
+
+bb = bb|b_bot|b_bot_const|gam_bot|lambda_bot_chol; //End of appending the paremeters for the bottom nest
+
+
+/*******Define _max_cov**********************************************/
+_max_cov = ones(nvarmt,1)|zeros(numout_top,1)|ones((nvargamt-numout_top),1);
+if (_cholk .== 1);
+	//Define what parameters you want to estimate for lambda_top
+    _max_chol_top = { 0  0  0   0   0  0  0   0,
+					  0  0  0   0   0  0  0   0, 
+					  0  1  1   0   0  0  0   0,
+					  0  1  0   1   0  0  0   0,
+					  0  1  1   0   1  0  0   0,
+					  0  1  0   0   0  1  0   0,
+					  0  1  0   1   1  0  1   0,
+					  0  1  0   0   0  0  1   1 }; 
+			
+	_max_cov = _max_cov|vech(_max_chol_top);  //print "_max_chol_top: " vech(_max_chol_top);			
+	//_max_cov = _max_cov|vech(diagrv(eye(nc_top),(0|0|ones((nc_top-2),1))));  //print "max_cov: " diagrv(eye(nc_top),(0|ones((nc_top-1),1)));
+elseif (_cholk .== 0);
+	_max_cov = _max_cov|zeros((nc_top*(nc_top+1)/2),1); //For the top nest ncov = nc_top*(nc_top+1)/2	
+endif;
+
+@APPEND _MAX_COV FOR ALPHA PARAMETERS@
+_max_cov = _max_cov|1|0|0|0|0|0|0; 
+
+//Definition of _max_cov for bottom nest
+// This is being slightly modified; since there is no bottom nest, corresponding to the outside good in the top nest 
+_max_cov = _max_cov|ones(sumc(nvarmmb[1:(nc_top-numout_top)]),1);
+//_max_cov = _max_cov|zeros(sumc(nvarmmb[1:(nc_top-numout_top)]),1);  // Fixing the bottom nest parameters in this run
+
+
+@Specify the _max_cov for bottom level gammaa parameters@
+_max_gam_bot = {};
+
+for i(1,(nc_top-numout_top),1);  // There is not bottom nest for the outside good in the top nest
+	_max_gam_bot = _max_gam_bot|zeros(numout_bot,1)|ones((nvargamb[i]-numout_bot),1); 
+endfor;	
+
+
+// Constant of bottom nest
+_max_consBot_work = ones((nc_bot[2]-1),1); 
+_max_consBot_school = 1|0|1|0|1|1|1;
+_max_consBot_escort = ones((nc_bot[4]-1),1);
+_max_consBot_perBus = ones((nc_bot[5]-1),1);
+_max_consBot_shop = 1|1|0|1;
+_max_consBot_meal = 1|1|0|1;
+_max_consBot_SocRec = 1|1|1|0;
+
+_max_consBot = _max_consBot_work|_max_consBot_school|_max_consBot_escort|_max_consBot_perBus|_max_consBot_shop|_max_consBot_meal |_max_consBot_SocRec ;
+
+@Modified bottom nest constant@  @Try to estimate all the bottom nest constants, see what happens@
+_max_cov = _max_cov|ones(sumc(consBot),1)|_max_gam_bot;	 @Because there is no bottom level gamma parameters in this run@
+//_max_cov = _max_cov|_max_consBot|_max_gam_bot;	 @Because there is no bottom level gamma parameters in this run@
+
+//clear _max_gam_bot;	
+	
+//Appending for choleskys of lambda_bot
+_max_chol_bot = {};
+
+ if (_cholk .== 1);
+	//Define _max_cov here for cholesky factors of all the bottom nests
+	//Define _max_cov here for cholesky factors of all the bottom nests
+	_max_chol_bot1 = vech(diagrv(eye(9),0|1|1|1|1|1|1|1|1));  //print "_max_chol_bot1: " _max_chol_bot1';
+	_max_chol_bot2 = vech(diagrv(eye(8),0|0|0|0|0|0|0|0));  //print "_max_chol_bot2: " _max_chol_bot2';
+	_max_chol_bot3 = vech(diagrv(eye(7),1|1|1|1|1|1|0));  //print "_max_chol_bot3: " _max_chol_bot3';
+	_max_chol_bot4 = vech(diagrv(eye(6),1|1|1|1|1|0));  //print "_max_chol_bot4: " _max_chol_bot4';
+	_max_chol_bot5 = vech(diagrv(eye(5),1|1|1|1|0));  //print "_max_chol_bot5: " _max_chol_bot5';
+	_max_chol_bot6 = vech(diagrv(eye(5),0|1|1|1|1));  //print "_max_chol_bot6: " _max_chol_bot6';
+	_max_chol_bot7 = vech(diagrv(eye(5),1|1|1|1|0));  //print "_max_chol_bot6: " _max_chol_bot7';
+	
+	_max_chol_bot = _max_chol_bot1| _max_chol_bot2|_max_chol_bot3|_max_chol_bot4|_max_chol_bot5|_max_chol_bot6|_max_chol_bot7;
+ else;
+	for i((numout_top+1),nc_top,1);  // Since there is no bottom nest in the outside good of the top nest
+		_max_chol_bot = _max_chol_bot|zeros((nc_bot[i]*(nc_bot[i]+1)/2),1);
+	endfor;
+endif;
+
+_max_cov = _max_cov|_max_chol_bot;
+
+
+/**********END OF DEFINITION OF _MAX_COV*************************************/	
+
+/***********DEFINE THE PARAMETER NAMES HERE**********************************/
+/* Define labels of the parameters in the baseline utility for output printing;
+   Provide as many parameter labels as the number of columns in ivm1 (i.e., the number of variables in the Psi function) */
+varBasTop =  "ASC2"|"ASC3"|"ASC4"|"ASC5"|"ASC6"|"ASC7"|"ASC8"|
+			 "MaleSc"|"MaleE"|
+			 "Age1W"|"Age1Sc"|"Age1Pb"|"Age1Sr"|
+			 "Age2W"|"Age2Sc"|"Age2E"|"Age2Pb"|
+			 "Age3Pb"|
+			 "Inc2W"|"Inc2M"|"Inc2Sr"|
+			 "Inc3Sc"|"Inc3Sh"|"Inc3M"|"Inc3Sr"|
+			 "Inc4Sh"|"Inc4M"|"Inc4Sr"|
+			 "UrbDmPb"|"UrbDmSh"|"UrbDmSr"|
+			 "FrdaySc"|"FrdaySh"|"FrdayM"|"FrdaySr"|
+			 "PrtDmW"|"PrtDmSc"|"PrtDmE"|"PrtDmPb"|"PrtDmSh"|"PrtDmSr"|
+			 "ZnDmSc";
+			 
+varGamTop  = 0 $+ "GTop" $+ ftocv(seqa(1,1,nvargamt),2,0);
+varCovTop =  0 $+ "chlTop" $+ ftocv(seqa(1,1,(nc_top*(nc_top+1)/2)),2,0);
+
+varAlpha = 0 $+ "Alpha" $+ ftocv(seqa(1,1,(nc_top-numout_top)),2,0);   // APPENDING FOR THE ALPHA PARAMETERS
+
+//Definition for the bottom
+//Refining to take out the constants
+varBasBot =  //"ASC2"|"ASC3"|"ASC4"|"ASC5"|"ASC6"|"ASC7"|"ASC8"|"ASC9"|
+		     "WMaleE"|"WMalePb"|"WMaleSh"|"WMaleM"|"WMaleSr"|
+			"WAge1W"|"WAge1Sc"|"WAge1E"|"WAge1Pb"|"WAge1Sh"|"WAge1M"|
+			"WAgN2W"|"WAgN2E"|"WAgN2Pb"|"WAgN2Sh"|"WAgN2M"|
+			"WAgN3Pb"|
+			"WInc2Sc"|
+			"WInc3W"|"WInc3Sc"|"WInc3Pb"|"WInc3Sh"|"WInc3M"|
+			"WInc4Sc"|"WInc4M"|"WInc4Sr"|
+			"WFlTmW"|"WFlTmE"|"WFlTmPb"|"WFlTmSh"|"WFlTmM"|"WFlTmSr"|
+			"WUrDmSh"|"WUrDmSr"|
+			"WFrDySc"|"WFrDyPb"|"WFrDyM"|
+			"WDrDmW"|"WDrDmSh"|"WDrDmM"|"WDrDmSr"|
+			"WZoneW"|"WZoneE"|"WZoneSh"|"WZoneSr"|
+			
+			
+			 //"ASC2"|"ASC3"|"ASC4"|"ASC5"|"ASC6"|"ASC7"|"ASC8"|
+		     "ScMaleSc"|
+			"ScAge1E"|"ScAge1Pb"|"ScAge1Sh"|
+			"ScIng3Sc"|"ScIng3E"|"ScIng3Pb"|"ScIng3Sr"|
+			"ScUrDmSh"|
+			 
+			 
+			 //"ASC2"|"ASC3"|"ASC4"|"ASC5"|"ASC6"|"ASC7"|
+		     "EMaleE"|"EMalePb"|"EMaleSh"|"EMaleM"|
+			"EAge1Pb"|"EAge1Sh"|"EAge1M"|
+			"EAgN2Pb"|"EAgN2M"|
+			"EAgN3Pb"|"EAgN3M"|
+			"EIng2Sh"|"EIng2M"|"EIng2Sr"|
+			"EIng3E"|"EIng3Sh"|"EIng3Sr"|
+			"EIng4E"|"EIng4Sh"|"EIng4Sr"|
+			"EUrDmPb"|"EUrDmSr"|
+			"EZoneE"|"EZoneM"|
+			
+			
+			 //"ASC2"|"ASC3"|"ASC4"|"ASC5"|"ASC6"|
+			"PbMaleSh"|"PbMaleM"|"PbMaleSr"|
+			"PbAge1Pb"|"PbAge1M"|
+			"PbAgN2Pb"|"PbAgN2Sh"|"PbAgN2Sr"|
+			"PbAgN3Pb"|"PbAgN3Sr"|
+			"PbInc4Sr"|
+			"PbUrDmSh"|"PbUrDmM"|
+			"PbFrDmPb"|"PbFrDmM"|
+			"PbZonePb"|
+			
+			//"ASC2"|"ASC3"|"ASC4"|"ASC5"|
+				"SHAge1Sr"|
+			"SHAgN2Sh"|	"SHAgN2Sr"|
+			"SHAgN3Sh"|"SHAgN3Sr"|
+			"SHIng2Sh"|	"SHIng2Sr"|
+			"SHIng3Sh"|"SHIng3M"|	
+			"SHIng4Sh"|"SHIng4M"|
+			"SHfrdyM"|
+			"SHdrDmSh"|
+ 
+			 //"ASC2"|"ASC3"|"ASC4"|"ASC5"|
+			 "MAgN3Sh"|
+			"MInc2M"|
+			"MInc3Sh"|
+			"MInc4Sh"|
+			"MUrDmSh"|"MUrDmSr"|
+			"MZoneSh"|
+
+			 
+			 //"ASC2"|"ASC3"|"ASC4"|"ASC5"|
+			  "SrMaleSh"|
+			"SrIng2Sh"|
+			"SrDrDmSh"|
+			"SrUrDmM"
+			 ;
+varConBot = "ASC2_W"|"ASC3_W"|"ASC4_W"|"ASC5_W"|"ASC6_W"|"ASC7_W"|"ASC8_W"|"ASC9_W"|
+			"ASC2_Sc"|"ASC3_Sc"|"ASC4_Sc"|"ASC5_Sc"|"ASC6_Sc"|"ASC7_Sc"|"ASC8_Sc"|
+			"ASC2_E"|"ASC3_E"|"ASC4_E"|"ASC5_E"|"ASC6_E"|"ASC7_E"|
+			"ASC2_Pb"|"ASC3_Pb"|"ASC4_Pb"|"ASC5_Pb"|"ASC6_Pb"|
+			"ASC2_Sh"|"ASC3_Sh"|"ASC4_Sh"|"ASC5_Sh"|
+			"ASC2_M"|"ASC3_M"|"ASC4_M"|"ASC5_M"|
+			"ASC2_Sr"|"ASC3_Sr"|"ASC4_Sr"|"ASC5_Sr";
+
+
+
+@Slightly changed, since there is no bottom nest within the outside good of the top nest@			 
+varGamBot  = 0 $+ "GBot" $+ ftocv(seqa(1,1,sumc(nvargamb[1:(nc_top-numout_top)])),2,0);
+
+//Calculate the total parameters in the bottom nest models
+ncovBot = 0;
+for i((numout_top+1),nc_top,1);
+	ncovBot = ncovBot + nc_bot[i]*(nc_bot[i]+1)/2;
+endfor;
+
+varCovBot = 0 $+ "chlBt"   $+ ftocv(seqa(1,1,ncovBot),2,0);	
+/***********END OF DEFINITION OF PARAMETER NAMES************************************************/
+
+_max_ParNames = varBasTop|varGamTop|varCovTop|varAlpha|varBasBot|varConBot|varGamBot|varCovBot;     // Appending all the parameter (or coefficient) names            
+_max_Options = { bfgs stepbt };
+_max_active = _max_cov;  //print "bb & _max_active: " bb~_max_active;
+
+//print "rows(bb): " rows(bb)  "rows(_max_active): " rows(_max_active) "rows(_max_ParNames): " rows(_max_ParNames);
+//print "check: " (nvarmt+nvargamt+(nc_top)*(nc_top+1)/2+sumc(nvarmmb) + sumc(consbot)+sumc(nvargamb)+ncovBot);
+//print "check: " (nvarmt+(nvargamt-numout_top)+sumc(nvarmmb));
+//print "_max_ParNames: " $_max_ParNames;
+
+print "Number of active parameters: " sumc(_max_active);
+print "rows bb: " rows(bb);
+//print "sumc(consBot): " sumc(consBot)  "rows(_max_consBot): " rows(_max_consBot) ;
+
+/******************************************************************************
+// ACTUAL PROGRAM AREA BEGINS, YOU DO NOT HAVE TO MODIFY ANYTHING BELOW THIS LINE
+******************************************************************************/
+
+nrep  = 1;
+final_result = {};
+count = 1;
+ 
+ for i(1,nrep,1); 
+     j = 1;	
+	 seednext = 983654+j-1;  // MACML variable: seed to run MACML
+	 dataset1 = dataMat[((i-1)*nobs)+1:(i*nobs),.]; 
+	 //print "i: " i "rows(dataset1): " rows(dataset1) "1st row: " dataset1[1,1] "Last row: " dataset1[nobs,1] "mean budget: " meanc(dataset1[.,18]);		
+	 _max_Maxiters = 0;
+	 _max_GradProc = &mainGrad;
+	 //_max_GradCheckTol = 1e-10;
+	 _max_CovPar = 2; // modify according to the type of standard errors you need	
+	 //start = timestr(0);
+	 
+	 //call mainFun(bb,dataset1);
+	 //call mainGrad(bb,dataset1);
+	 
+	 // Converged estimates from modified specification
+	 bb = { -6.7183	-12.4327	-10.5232	-9.0548	-9.4213	-9.5136	-9.259	0.3669	-0.3708	0.2495	2.761	-0.658	0.0883	0.2058	
+	 1.1149	0.7679	-0.4499	-0.2636	0.0885	0.2841	0.2504	-0.195	-0.3487	0.3306	0.4364	-0.4197	0.4033	0.3865	0.193	0.2141	
+	 0.1628	-0.3284	0.3592	0.4538	0.1417	-1.0746	1.8167	0.4938	0.4304	0.1889	0.3515	-0.307	-1000	5.7633	6.5446	4.1845	
+	 4.6641	4.4253	4.9122	4.6121	0.1589	-0.0955	-0.1806	-0.2061	-0.2135	-0.7005	-0.1612	-0.5651	-0.1278	0.4556	-0.1391	0.3295	
+	 0.2518	-0.1122	-0.2389	-0.3769	-0.2993	0.3173	0.099	0.3383	0.3372	0.2404	0.2689	0.2788	1	0	1	0	-0.362	1.4704	
+	 0	-0.5828	0	1.9294	0	-0.8936	-0.4139	0	1.4969	0	-0.7509	0	0	0	1.6896	0	-0.5626	0	-0.357	-0.4223	0	1.0067
+	 0	-0.4628	0	0	0	0	-0.6572	1.3538	0.0439	0	0	0	0	0	0	-0.4362	-0.8969	-0.918	-0.4945	-0.1773	-0.2034	2.1047
+	 1.5771	-1.2734	-0.7421	-0.3057	-0.1495	2.1392	-0.852	-0.4127	-0.2144	-0.4855	0.7721	0.1436	1.3889	0.1946	0.2112	0.3772	
+	 1.3351	0.5429	0.3509	0.2946	0.5169	0.8131	0.2448	0.5593	0.387	0.8022	0.474	-0.7305	0.3984	0.6626	4.9274	2.1264	
+	 1.7776	1.4214	-0.1457	-0.3215	-0.2158	-0.2181	0.3598	-0.8541	-0.739	-1.1881	1.0993	0.5923	1.0071	0.6276	-0.8491	-0.6701	
+	 -0.513	-0.4543	-0.3209	0.7037	0.3412	-0.516	1.0141	-0.65	0.944	-0.9245	-1.0716	-0.7717	0.4194	0.4812	-0.6535	0.6795	
+	 0.3491	-0.608	0.7375	0.865	0.422	0.2433	-0.3965	-0.4	-0.2425	-0.381	-0.9692	0.5266	-0.3412	-0.2408	-0.4466	-0.5933	
+	 -0.594	0.449	0.5587	0.283	0.3856	0.3361	0.3625	-1.3043	-0.2935	-0.5022	-0.3898	-1.4976	0.2533	-0.4639	0.4584	0.2037	
+	 0.3469	0.494	0.421	0.8345	-1.2608	-0.8858	-0.6024	-0.7878	0.6456	0.6437	0.6902	-0.164	0.3542	0.6509	0.89	-3.0551	
+	 -14.0625	-12.7956	-11.9431	-9.7505	-11.7882	-12.7314	-12.6422	-2.6937	-8.378	-7.4306	-7.5745	-5.5349	-7.3883	
+	 -7.8311	-0.7833	-4.5473	-6.3222	-3.7701	-3.7233	-5.7507	-1.3412	-5.9896	-5.3219	-5.9749	-5.5271	-1.4542	-5.8525	-6.1095	-5.3847
+	 -1.7611	-6.8724	-7.8754	-7.1082	-1.5038	-6.7711	-6.8912	-6.7013	-1000	-1000	5.5174	5.586	2.6121	3.4612	2.9195	3.2842
+	 4.5344	1.2264	-0.3224	-0.4552	-0.3744	-2.0599	0.3774	0.1687	-1000	-1000	4.5237	3.88	4.3315	4.4644	4.5605	5.0376	
+	 1.4716	-0.8922	1.3492	-1000	-1000	3.0013	6.2996	4.4045	4.6409	7.5707	0.6259	0.7728	-1000	-1000	3.5112	4.3156	
+	 5.0874	7.8134	-0.4091	0.359	-0.861	-0.9947	0.7207	-1000	-1000	4.6463	5.4942	5.4808	-1000	-1000	3.9287	4.1373	
+	 6.9022	-1000	-1000	4.2309	5.6036	5.4509	-0.4815	-0.7517	0.6914	0.3793	0.7639	-0.6891	1	0	0.3019	0	0	1.7936	
+	 0	0	0	1.863	0	0	0	0	2.7977	0	0	0	0	0	3.0004	0	0	0	0	0	0	2.9778	0	0	0	0	0	0	
+	 0	2.9568	0	0	0	0	0	0	0	0	2.6874	1	0	1	0	0	1	0	0	0	1	0	0	0	0	1	0	0	0	0	
+	 0	1	0	0	0	0	0	0	1	0	0	0	0	0	0	0	1	0.7422	0	0.6258	0	0	0.9293	0	0	0	0.9289	0	
+	 0	0	0	0.9868	0	0	0	0	0	1.0768	0	0	0	0	0	0	1	0.8764	0	0.6638	0	0	1.5777	0	0	0	1.1741
+	 0	0	0	0	1.2292	0	0	0	0	0	1	-0.4557	0	0.597	0	0	0.8251	0	0	0	0.8224	0	0	0	0	1	1	0
+	 0.0002	0	0	1.6265	0	0	0	1.9292	0	0	0	0	0.9044	0.7308	0	1.0634	0	0	0.9794	0	0	0	0.6468	0	0
+	 0	0	1 };
+			
+	bb = bb';	
+	
+    //print "rows bb: " rows(bb); 	
+	 
+	{ x,f,g,cov,retcode } = maxprt(maxlik(dataset1,0,&mainFun,bb)); 
+ endfor;
+ 
+ //output file = TopBotSim01.asc reset;
+ //print final_result;
+
+
+ /***********HERE CREATE A FUNCTION THAT WILL CALL THE lprnorm(x,dta) (L+1) TIMES**************************
+  DEPENDING ON THE PARAMETERS THAT IS NEEDED TO RUN THE MODEL***************************
+  *******************WHERE L IS NUMBER OF BOTTOM NESTS AND 1 IS FOR THE TOP NEST MODEL*******************
+  ***************THE PURPOSE OF THE IS FUNCTON IS TO CREATE THE WHOLE LOGLIKELIHOOD FUNCTION*******/
+
+ @THIS FUNCTION WILL RETRUN THE LOG LIKELIHOOD FUNCTION AS A COLUMN VECTOR@
+ @EACH CALL TO THE lprnorm(x,dta) WILL GENERATE ONE SET OF ln(likelihood) FOR ONE MDC MODEL@
+ @mainFun(x,dta) WILL ADD ALL THE ln(likelihood) AND WILL RETURN FINALLY@
+ proc mainFun(x,dta); //x takes the parameters; i.e. bb and dta takes the data matrix with nobs rows
+	 local ll, nc, ivm, ivd, ivg, nvarm, nvardel, nvargam, eqmatdel, eqmatgam, beta, flagchm, numout;
+	 local const_base, beta_base, beta_gam, beta_chol, chol_count;
+	 local dtaNew, x_sel, par_sel;
+	 
+	 ll = zeros(rows(dta),1); //This variable will add the log-likelihood returned from lprnorm
+	 for k(0,(nc_top-numout_top),1); @This loop will run ((nc_top-numout_top)+1) times; each run will call lprnorm with appropriate beta@
+	 //for k(0,0,1);	 
+		 if(k.==0); //Indictaes top nest
+			 nc = nc_top;    //print "nc: " nc;//nc_top is defined previously  
+			 ivm = ivmt; ivd = ivdt; ivg = ivgt;  //print "ivm & ivmt: " ivm'~ivmt';  print "ivd & ivdt: " ivd'~ivdt';  print "ivg & ivgt: " ivg'~ivgt';
+			 nvarm = nvarmt; nvardel = nvardelt; nvargam = nvargamt; //print "nvarm: " nvarm "nvardel: " nvardel "nvargam: " nvargam;
+			 //beta = x[1:nvarmt+nvargamt+(nc_top*(nc_top+1)/2)+sumc(nvarmb)]; //print "rows(beta): " rows(beta);//print "beta: " beta';
+			 @Changed to nvarmmb from nvarmb@
+			 beta = x[1:nvarmt+nvargamt+(nc_top*(nc_top+1)/2)+(nc_top-numout_top)+sumc(nvarmmb)]; //print "rows(beta): " rows(beta);//print "beta: " beta';
+			 flagchm = flagchmFull[1:nc_top];  //print "flagchm: " flagchm;
+			 numout = numout_top;  //print "numout: " numout;
+		 elseif (k.== 1);  // We want to skip the k=1 run 			
+			nc = nc_bot[k+numout_top];  //print "nc: " nc;//Number of parameters in each of the bottom nests 
+			ivm = ivmb[1:nvarmb[k]*nc_bot[(k+numout_top)]]; 	//print "ivm: " ivm;
+			ivd = ivdb[1:nvardelb[k]*nc_bot[(k+numout_top)]]; 	//print "ivd: " ivd;
+			ivg = ivgb[1:nvargamb[k]*nc_bot[(k+numout_top)]]; 	//print "ivg: " ivg;
+			nvarm = nvarmb[k];  nvardel = nvardelb[k];  nvargam = nvargamb[k];  	//print "nvarm: " nvarm "nvardel: " nvardel "nvargam: " nvargam;
+			/*beta_base = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+nvarmb[k]]; 	//print "beta_bsae: " beta_base';
+			beta_gam = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+sumc(nvarmb[1:(nc_top-numout_top)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+sumc(nvarmb[1:(nc_top-numout_top)])+nvargamb[k]]; 	//print "beta_gam: " beta_gam';
+			beta_chol = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+sumc(nvarmb[1:(nc_top-numout_top)])+sumc(nvargamb[1:(nc_top-numout_top)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+sumc(nvarmb[1:(nc_top-numout_top)])+sumc(nvargamb[1:(nc_top-numout_top)])+nc_bot[k+numout_top]*(nc_bot[k+numout_top]+1)/2]; 	//print "beta_chol: " beta_chol';
+			beta = beta_base|beta_gam|beta_chol; 	//print "beta: " beta;*/
+			const_base = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb)+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb)+consBot[k]]; 	//print "beta_bsae: " beta_base';
+			beta_base = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+nvarmmb[k]]; 	//print "beta_bsae: " beta_base';
+			beta_gam = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+nvargamb[k]]; 	//print "beta_gam: " beta_gam';
+			beta_chol = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:(nc_top-numout_top)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:(nc_top-numout_top)])+nc_bot[k+numout_top]*(nc_bot[k+numout_top]+1)/2]; 	//print "beta_chol: " beta_chol';
+			//beta = beta_base|beta_gam|beta_chol; 	//print "beta: " beta;
+			beta = const_base|beta_base|beta_gam|beta_chol; 	//print "beta: " beta;
+			flagchm = flagchmFull[nc_top+1:nc_top+nc_bot[k+numout_top]]; 	//print "flagchm: " flagchm;
+			numout = numout_bot;   //print "numout: " numout;
+		 else;
+			nc = nc_bot[k+numout_top];  //print "nc: " nc; //Number of parameters in each of the bottom nests
+			ivm = ivmb[sumc(nvarmb[1:(k-1)].*nc_bot[(numout_top+1):(numout_top+k-1)])+1:sumc(nvarmb[1:k].*nc_bot[(numout_top+1):(k+numout_top)])];  //print "ivm: " ivm;
+			ivd = ivdb[sumc(nvardelb[1:(k-1)].*nc_bot[(numout_top+1):(numout_top+k-1)])+1:sumc(nvardelb[1:k].*nc_bot[(numout_top+1):(k+numout_top)])];  //print "ivd: " ivd;
+			ivg = ivgb[sumc(nvargamb[1:(k-1)].*nc_bot[(numout_top+1):(numout_top+k-1)])+1:sumc(nvargamb[1:k].*nc_bot[(numout_top+1):(k+numout_top)])];	//print "ivg: " ivg;
+			nvarm = nvarmb[k];  nvardel = nvardelb[k];  nvargam = nvargamb[k];		//print "nvarm: " nvarm "nvardel: " nvardel "nvargam: " nvargam;
+			/*beta_base = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+sumc(nvarmb[1:(k-1)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+sumc(nvarmb[1:k])];  //print "beta_base: " beta_base';
+			beta_gam = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+sumc(nvarmb[1:(nc_top-numout_top)])+sumc(nvargamb[1:(k-1)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+sumc(nvarmb[1:(nc_top-numout_top)])+sumc(nvargamb[1:k])];  //print "beta_gam: " beta_gam';
+			chol_count = 0;
+			for m(1,(k-1),1);
+				chol_count = chol_count + nc_bot[(m+numout_top)]*(nc_bot[(m+numout_top)]+1)/2;
+			endfor;
+			beta_chol = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+sumc(nvarmb[1:(nc_top-numout_top)])+sumc(nvargamb[1:(nc_top-numout_top)])+chol_count+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+sumc(nvarmb[1:(nc_top-numout_top)])+sumc(nvargamb[1:(nc_top-numout_top)])+chol_count+nc_bot[(k+numout_top)]*(nc_bot[(k+numout_top)]+1)/2];  //print "beta_chol: " beta_chol;
+			beta = beta_base|beta_gam|beta_chol;  //print "beta: " beta;*/
+			const_base = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb)+sumc(consBot[1:(k-1)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb)+sumc(consBot[1:k])];  //print "const_base: " const_base;
+			beta_base = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(k-1)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:k])];  //print "beta_base: " beta_base';
+			beta_gam = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:(k-1)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:k])];  //print "beta_gam: " beta_gam';
+			chol_count = 0;
+			for m(1,(k-1),1);
+				chol_count = chol_count + nc_bot[(m+numout_top)]*(nc_bot[(m+numout_top)]+1)/2;
+			endfor;
+			beta_chol = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:(nc_top-numout_top)])+chol_count+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:(nc_top-numout_top)])+chol_count+nc_bot[(k+numout_top)]*(nc_bot[(k+numout_top)]+1)/2];  //print "beta_chol: " beta_chol;
+			beta = const_base|beta_base|beta_gam|beta_chol;  //print "beta: " beta;
+			flagchm = flagchmFull[nc_top+sumc(nc_bot[(numout_top+1):(numout_top+k-1)])+1:nc_top+sumc(nc_bot[(1+numout_top):(k+numout_top)])]; //print "flagchm: " flagchm;
+			numout = numout_bot;  //print "numout: " numout;
+		endif;
+		eqmatdel = ones(1,nc);
+		eqmatgam = eye(nvargam);
+		
+		if (k.== 0); // Different functions are getting called depending on the nest
+			//"k: " k;
+			ll = ll + lprnormTop(beta,dta, nc, nvarm, nvardel, nvargam, ivm, ivd, ivg, flagchm, eqmatdel, eqmatgam, numout);	 	
+		else;
+			//"k: " k;
+			ll = ll + lprnormBottom(beta,dta, nc, nvarm, nvardel, nvargam, ivm, ivd, ivg, flagchm, eqmatdel, eqmatgam, numout);	 
+		endif;
+		
+	endfor;
+	output off;
+	output file = With_analytic_gradient_1.asc on;
+	print "meanc(LL): " meanc(LL);
+	output off;
+	
+	output file = With_analytic_gradient_2.asc on;
+	x_sel = selif(x,_max_active .== 1);
+	par_sel = selif(_max_ParNames,_max_active .== 1);
+	print  $par_sel';
+	print x_sel';
+	output off;
+	
+	
+	//print "meanc(LL): " meanc(LL);
+	retp(ll); 
+ endp;
+
+
+@THIS IS THE FUNCTION, THAT WILL CALCULATE GRADIENT@
+proc mainGrad(x,dta); //x takes the parameters; i.e. bb and dta takes the data matrix with nobs rows
+	 local my_deriv, nc, ivm, ivd, ivg, nvarm, nvardel, nvargam, eqmatdel, eqmatgam, beta, flagchm, numout;
+	 local beta_base, beta_gam, beta_chol, chol_count, dtaNew, _new_Max_active, _new_max_chol_bot;
+	 local temp_deriv, beta_deriv0, beta_deriv, gamma_deriv, chol_deriv, const_deriv;
+	 local const_base;
+	 
+	 my_deriv = {}; //This variable will add the log-likelihood returned from lprnorm
+	 const_deriv = {}; beta_deriv = {};  gamma_deriv = {}; chol_deriv = {};
+	 for k(0,(nc_top-numout_top),1); @This loop will run ((nc_top-numout_top)+1) times; each run will call lprnorm with appropriate beta@
+	 //for k(0,0,1);	 
+		 if(k.==0); //Indictaes top nest
+			 nc = nc_top;    //print "nc: " nc;//nc_top is defined previously  
+			 ivm = ivmt; ivd = ivdt; ivg = ivgt;  //print "ivm & ivmt: " ivm'~ivmt';  print "ivd & ivdt: " ivd'~ivdt';  print "ivg & ivgt: " ivg'~ivgt';
+			 nvarm = nvarmt; nvardel = nvardelt; nvargam = nvargamt; //print "nvarm: " nvarm "nvardel: " nvardel "nvargam: " nvargam;
+			 beta = x[1:nvarmt+nvargamt+(nc_top*(nc_top+1)/2)+(nc_top-numout_top)+sumc(nvarmmb)]; //print "rows(beta): " rows(beta);//print "beta: " beta';
+			 flagchm = flagchmFull[1:nc_top];  //print "flagchm: " flagchm;
+			 numout = numout_top;  //print "numout: " numout;
+			 //_new_max_active = ones(nvarm,1)|zeros(numout,1)|ones((nvargam-numout),1)|zeros((nc_top*(nc_top+1)/2),1)|ones(sumc(nvarmb),1);  //print "_new_max_active: " _new_max_active;
+			 _new_max_active = _max_cov[1:nvarm+nvargam+(nc_top*(nc_top+1)/2)+(nc_top-numout_top)+sumc(nvarmmb)];  @Diagonals are@ //print "_new_max_active: " _new_max_active;
+			 //print "rows(_new_max_active): " rows(_new_max_active);
+			 
+			 eqmatdel = ones(1,nc);
+			 eqmatgam = eye(nvargam);
+			 temp_deriv = lgdnormTop(beta,dta, nc, nvarm, nvardel, nvargam, ivm, ivd, ivg, flagchm, eqmatdel, eqmatgam, numout, _new_max_active); 
+			 //my_deriv = temp_deriv;  @For top nest estimation@
+			 my_deriv = my_deriv~temp_deriv[.,1:nvarm+nvargam+(nc_top*(nc_top+1)/2)+(nc_top-numout_top)];
+			 beta_deriv0 = temp_deriv[.,nvarm+nvargam+(nc_top*(nc_top+1)/2)+(nc_top-numout_top)+1:nvarm+nvargam+(nc_top*(nc_top+1)/2)+(nc_top-numout_top)+sumc(nvarmmb)];
+			 
+			 clear temp_deriv;
+		 elseif (k.== 1);  // We want to skip the k=1 run 			
+			//print "k: " k; 
+			nc = nc_bot[k+numout_top];  //print "nc: " nc;//Number of parameters in each of the bottom nests 
+			ivm = ivmb[1:nvarmb[k]*nc_bot[(k+numout_top)]]; 	//print "ivm: " ivm;
+			ivd = ivdb[1:nvardelb[k]*nc_bot[(k+numout_top)]]; 	//print "ivd: " ivd;
+			ivg = ivgb[1:nvargamb[k]*nc_bot[(k+numout_top)]]; 	//print "ivg: " ivg;
+			nvarm = nvarmb[k];  nvardel = nvardelb[k];  nvargam = nvargamb[k];  	//print "nvarm: " nvarm "nvardel: " nvardel "nvargam: " nvargam;
+			const_base = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb)+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb)+consBot[k]];
+			beta_base = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+nvarmmb[k]]; 	//print "beta_bsae: " beta_base';
+			beta_gam = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+nvargamb[k]]; 	//print "beta_gam: " beta_gam';
+			beta_chol = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:(nc_top-numout_top)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:(nc_top-numout_top)])+nc_bot[k+numout_top]*(nc_bot[k+numout_top]+1)/2]; 	//print "beta_chol: " beta_chol';
+			beta = const_base|beta_base|beta_gam|beta_chol; 	//print "beta: " beta;
+			flagchm = flagchmFull[nc_top+1:nc_top+nc_bot[k+numout_top]]; 	//print "flagchm: " flagchm;
+			numout = numout_bot;  //print "numout: " numout;
+			_new_max_chol_bot = _max_chol_bot[1:nc_bot[k+numout_top]*(nc_bot[k+numout_top]+1)/2];
+			_new_max_active = ones(nvarm,1)|zeros(numout,1)|ones((nvargam-numout),1)|_new_max_chol_bot;  //print "_new_max_active: " _new_max_active;
+			
+			eqmatdel = ones(1,nc);
+			eqmatgam = eye(nvargam);
+			temp_deriv = lgdnormBottom(beta,dta, nc, nvarm, nvardel, nvargam, ivm, ivd, ivg, flagchm, eqmatdel, eqmatgam, numout, _new_max_active); 
+			
+			const_deriv = const_deriv~temp_deriv[.,1:rows(const_base)]; 
+			beta_deriv = beta_deriv~temp_deriv[.,rows(const_base)+1:rows(const_base)+rows(beta_base)];
+			gamma_deriv = gamma_deriv~temp_deriv[.,(rows(const_base)+rows(beta_base)+1):rows(const_base)+rows(beta_base)+rows(beta_gam)];
+			chol_deriv = chol_deriv~temp_deriv[.,(rows(const_base)+rows(beta_base)+rows(beta_gam)+1):(rows(const_base)+rows(beta_base)+rows(beta_gam)+rows(beta_chol))];
+			
+			clear temp_deriv;
+		 else;
+			//print "k: " k;
+			nc = nc_bot[k+numout_top];  //print "nc: " nc; //Number of parameters in each of the bottom nests
+			ivm = ivmb[sumc(nvarmb[1:(k-1)].*nc_bot[(numout_top+1):(numout_top+k-1)])+1:sumc(nvarmb[1:k].*nc_bot[(numout_top+1):(k+numout_top)])];  //print "ivm: " ivm;
+			ivd = ivdb[sumc(nvardelb[1:(k-1)].*nc_bot[(numout_top+1):(numout_top+k-1)])+1:sumc(nvardelb[1:k].*nc_bot[(numout_top+1):(k+numout_top)])];  //print "ivd: " ivd;
+			ivg = ivgb[sumc(nvargamb[1:(k-1)].*nc_bot[(numout_top+1):(numout_top+k-1)])+1:sumc(nvargamb[1:k].*nc_bot[(numout_top+1):(k+numout_top)])];	//print "ivg: " ivg;
+			nvarm = nvarmb[k];  nvardel = nvardelb[k];  nvargam = nvargamb[k];		//print "nvarm: " nvarm "nvardel: " nvardel "nvargam: " nvargam;
+			const_base = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb)+sumc(consBot[1:(k-1)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb)+sumc(consBot[1:k])];  //print "const_base: " const_base;
+			beta_base = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(k-1)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:k])];   //print "beta_base: " beta_base';
+			beta_gam = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:(k-1)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:k])];   //print "beta_gam: " beta_gam';
+			chol_count = 0;
+			for m(1,(k-1),1);
+				chol_count = chol_count + nc_bot[(m+numout_top)]*(nc_bot[(m+numout_top)]+1)/2;
+			endfor;
+			beta_chol = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:(nc_top-numout_top)])+chol_count+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:(nc_top-numout_top)])+chol_count+nc_bot[(k+numout_top)]*(nc_bot[(k+numout_top)]+1)/2];  //print "beta_chol: " beta_chol;
+			beta = const_base|beta_base|beta_gam|beta_chol;  //print "beta: " beta;
+			flagchm = flagchmFull[nc_top+sumc(nc_bot[(numout_top+1):(numout_top+k-1)])+1:nc_top+sumc(nc_bot[(1+numout_top):(k+numout_top)])]; //print "flagchm: " flagchm;
+			numout = numout_bot;  //print "numout: " numout;
+			_new_max_chol_bot = _max_chol_bot[chol_count+1:chol_count+nc_bot[k+numout_top]*(nc_bot[k+numout_top]+1)/2];
+			_new_max_active = ones(nvarm,1)|zeros(numout,1)|ones((nvargam-numout),1)|_new_max_chol_bot;  //print "_new_max_active: " _new_max_active;
+			
+			eqmatdel = ones(1,nc);
+			eqmatgam = eye(nvargam);
+			temp_deriv = lgdnormBottom(beta,dta, nc, nvarm, nvardel, nvargam, ivm, ivd, ivg, flagchm, eqmatdel, eqmatgam, numout, _new_max_active); 
+			
+			const_deriv = const_deriv~temp_deriv[.,1:rows(const_base)]; 
+			beta_deriv = beta_deriv~temp_deriv[.,rows(const_base)+1:rows(const_base)+rows(beta_base)];
+			gamma_deriv = gamma_deriv~temp_deriv[.,(rows(const_base)+rows(beta_base)+1):rows(const_base)+rows(beta_base)+rows(beta_gam)];
+			chol_deriv = chol_deriv~temp_deriv[.,(rows(const_base)+rows(beta_base)+rows(beta_gam)+1):(rows(const_base)+rows(beta_base)+rows(beta_gam)+rows(beta_chol))];
+				
+			clear temp_deriv;
+		endif;
+		
+	endfor;
+	my_deriv = my_deriv~(beta_deriv0+beta_deriv)~const_deriv~gamma_deriv~chol_deriv;
+	
+	retp(my_deriv); 
+ endp;
+			 
+
+/******************************************************************************
+                          Procedure definitions begin: MDCMP
+******************************************************************************/
+proc lprnormBottom(x,dta,nc, nvarm, nvardel, nvargam, ivm, ivd, ivg, flagchm, eqmatdel, eqmatgam,numout );
+ local e1,wt,xbase, xdel,xsigm,xsigmm,xgam,xsd,xcov,v2,w2,u2,j,v,Vf,w,u,a,f,b,m,mq,cqq,cq,sel,Jac,e,d, k;
+ local covb,covn,ident,min1,p3,seedn,sq,app1,hj,zj,covj,corrj,p1,p2,ch,nch,ha,hb,mu,mu_final,omegacov,omegacorr,z1,count, dummy;
+ local MBig, im, om, Vf1, errDiff, chNchId, chNchNo, ncDiff, iden_matrix, one_negative, mu_i, corrj_i, covj_i;
+ local nobs;
+ 
+ e1 = rows(dta);  nobs = e1;  //print "nobs: " nobs; //e1 contains the number of observations
+ wt = dta[.,wtind]; //Get the weight in a column
+ xbase = x[1:nvarm]; //print "xbase: " xbase;//Baseline utility parameters 
+ xdel  = eqmatdel'*(-1000); //print "xdel: " xdel;//Converts the no. of alpha parameters to be estimated to the total no. of alternatives, nc
+ xgam  = eqmatgam'*x[nvarm+1:nvarm+nvargam]; //print "xgam: " xgam;//same as above
+ xcov  = upmat(xpnd(x[nvarm+nvargam+1:nvarm+nvargam+(nc*(nc+1)/2)])); //print "xcov: " xcov;//Get the cholesky factors - the upper triangular matrix
+
+//multiply the variables with the appropriate betas for all the alternatives
+ v2 = (ones(nc,1) .*. xbase)*~(dta[.,ivm])';
+ w2 = (ones(nc,1) .*. xdel)*~(dta[.,ivd])'; //For alpha
+ u2 = (ones(nc,1) .*. xgam)*~(dta[.,ivg])'; //For gamma
+
+//Sum the deterministic portion of the utility, alpha and gamma
+ j=1;
+ v = {};
+ w = {};
+ u = {};
+ do until j == nc+1;
+   v = v~(sumc(v2[(j-1)*nvarm+1:(j*nvarm),.]));			// beta*zeta deterministic
+   w = w~(sumc(w2[(j-1)*nvardel+1:(j*nvardel),.]));		// alpha
+   u = u~(sumc(u2[(j-1)*nvargam+1:(j*nvargam),.]));		// gamma
+   j = j+1;
+ endo;
+
+ //print "meanc(v): " meanc(v)';
+
+ clear v2,w2;
+ a = exp(w);		
+ if _alp0to1;
+   a = 1/(1+exp(w)); 		// a is 1-alpha
+ endif;
+
+
+ f = exp(u);				// gamma
+ b = dta[.,flagchm] .> 0;	// 1 if chosen, 0 if not //A nobs x nc matrix
+ m = sumc(b');				// number of chosen alternatives  //an nobs x 1 column vector
+
+ //print "sumc(b): " sumc(b');	
+
+ // Identifying alternative mq
+ mq = b.* (seqa(1,1,nc))'; //Convert the 1's into the serial number of the alternatives
+ mq = substute(mq,b.==0,nc+1); //Give a number greater than the total number of alternatives to the unchosen alternatives
+ mq = minc(mq'); //Select the id of the first chosen alternative //mq is a nobs x 1 column vector
+ 
+ @Added to correct for the fact that, to correct for the fact that, mq is (nc+1) for ind who did not chose any alternatives in the bottom nest@
+ mq = (mq .* (sumc(b').> 0)) + ((sumc(b').== 0) .* 2);
+ 
+ Vf = zeros(e1,nc);
+ 
+ //All the matrices in this equation are nobs x nc, must require the use of dot operator
+ Vf[.,1:numout] = v[.,1:numout]-a[.,1:numout].*ln((dta[.,flagchm[1:numout]]+f[.,1:numout]))-ln(ones(e1,numout));	// deterministic component V //An nobs by nc matrix //Replaced price with ones(nobs,nc)
+ Vf[.,(1+numout):nc] = v[.,(1+numout):nc]-a[.,(1+numout):nc].*ln((dta[.,flagchm[(1+numout):nc]]+f[.,(1+numout):nc])./f[.,(1+numout):nc])-ln(ones(e1,(nc-numout)));
+ //Vf = v-a.*ln((dta[.,flagchm]+f)./f)-ln(dta[.,flagprcm]);
+
+ //Taking differences w/r to alternative mq
+ cqq = reshape(((seqa(1,1,nc).*.ones(1,nobs)))', nobs*nc, 1 ); //cqq is a column of the seq of alternative numbers repeated nobs times
+ cq = reshape(b, nobs*nc, 1 ); //Convert b into a column, where the seq is the participation indicator for 1st obs then for second observation and so on
+ sel = cqq.*(cqq .!= (mq.*.ones(nc,1)));
+ cq = reshape(selif(cq, cqq .== sel), nobs, nc-1); //cq is b arranged an nobs x (nc- 1) matrix//alternatives are 1 0 with 1 for selected and 0 for non-selected
+ 
+ 
+ //Jacobian computation - not dividing by the price of mq, 
+ //Correct if no price variation - need to correct if there is price variation
+ Jac = (a.*b)./((dta[.,flagchm]+f));
+ Jac = Jac./(ones(nobs,nc)); //Replaced price with ones(nobs,nc) 
+ Jac = substute(Jac,b.==0,1); //
+ e = (1/Jac).*b;  //nobs x nc matrix
+ d = sumc((e'));//nobs x 1, the summation portion of the Jacobian
+ Jac = (prodc((Jac'))).*d; //An nobs by 1 matrix
+  
+ covn = xcov'*xcov; //print covn;
+
+ //Create the Big M matrix
+ ncDiff = (nc-1); @How many rows in each chunk of M@
+ MBig = zeros(ncDiff*nc,nc);
+ iden_matrix = eye(nc-1);
+ one_negative = -ones(nc-1,1);
+   
+  for im(1,nc,1);
+	if(im eq 1);
+		MBig[((im-1)*ncDiff+1):im*ncDiff,.] = one_negative ~ iden_matrix; @First column is filled up by -1, the rest of the matrix is filled up by (nc-1) identity matrix@
+	elseif(im eq nc);
+		MBig[((im-1)*ncDiff+1):im*ncDiff,.] = iden_matrix ~ one_negative;	@Last column is filled up by -1, the rest of the matrix is filled up by (nc-1) identity matrix@
+	else;
+		MBig[((im-1)*ncDiff+1):im*ncDiff,.] = iden_matrix[.,1:im-1] ~ one_negative ~ iden_matrix[.,im:nc-1]; @Choice column filled up by -1@
+	endif;
+  endfor;
+ @END OF CREATING MBig@
+ 
+ 
+ @NEXT CREATE hj, covj, corrj, om - ALL OF THESE WILL VARY BY WHICH ALTERNATIVE IS CHOSEN@
+ hj = zeros(nobs,(nc-1)); @This will hold the differenced mean@
+ mu = zeros(nobs,(nc-1)); @This will hold the differenced mean divided by the stadard deviation@
+ covj = zeros((nc-1)*nc,(nc-1)); @Variance covariance matrix of the differenced error@
+ corrj = zeros((nc-1)*nc,(nc-1)); @Error correlation matrix of the differenced error@
+ om = zeros(nc,(nc-1)); @To hold the diagonal elements of the error difference matrix@
+ 
+ @mq is a column vector that holds the first chosen alternative for an individual@
+ @m is a column vector that contains the number of chosen alternatives for an individual@
+ for i(1,nc,1);
+	@Get the M depending on the choice of the alternative@
+	app1 = MBig[(i-1)*ncDiff+1:i*ncDiff,.]; @Get the appropriate M depending on which alternative has been chosen@
+	Vf1 = (app1*Vf')'; @Utility is a nobs by nc matrix@ @Direct product will have nobs rows and nc columns@
+	hj = hj + (Vf1 *~ (mq .== i)); @This is an nobs by (nc-1), appropriately created depending on which alternative has been chosen@
+	errDiff = app1*covn*app1'; @The error difference matrix@
+	covj[(i-1)*ncDiff+1:i*ncDiff,.] = errDiff;   
+	om[i,.] = diag(errDiff)'; @After taking square root making it a row vector@ @sqrt has not bee taken@
+	mu = mu + ((hj *~ (mq .== i)) ./sqrt(om[i,.])); @Mean divided by the square root of variance, considering the first chosen alternative@
+	corrj[(i-1)*ncDiff+1:i*ncDiff,.] = diagrv(corrvc(errDiff),ones(nc-1,1)); @corrj is the correlation matrix for error variance covariance matrix@
+	clear Vf1, errDiff;
+ endfor;
+ @After end of this loop, hj is a nobs by (nc-1) matrix, and covj is a (nc-1)*nc by (nc-1) matrix, @
+ @Now in the rest of the likelihood code all that you need to do is to pick the right covj, corrj, hj and mu@ 
+  
+ p3 = ones(nobs,1);
+ seedn = seednext; //A different seed is used for each individual, across iterations the seed remain the same
+ sq = seedn;
+ 
+
+ for j(1,nobs,1);
+   if (sumc(b[j,.]') .> 0);	
+	// Case 1: only corner solutions - only one alternative is chosen - only joint normal cdf needs to be calculated
+	if m[j] == 1;
+		p1 = 1;	
+		mu_i = -mu[j,.]; @This would be a (nc-1) vector, a row vector@
+		corrj_i = corrj[(mq[j]-1)*ncDiff+1:mq[j]*ncDiff,.]; @This would be an (nc-1) by (nc-1) matrix@
+	    if (nc-1)==1; //Takes care of two (total) alternatives case
+			p2 = cdfn(mu_i);
+		elseif (nc-1)<3; //Takes care of three (total) alternatives case
+			p2 = cdfbvn(mu_i[1],mu_i[2],corrj_i[1,2]);
+		else; // Takes care of more than three (total) alternatives case
+			{p2,sq} = cdfMvna(mu_i,corrj_i, seedn);  @mu_i need to be a row vector@
+		endif;
+		
+		clear mu_i, corrj_i;	
+		
+	// Case 2: only interior soultions - all the available alternatives are chosen - only a joint normal pdf needs to be calculated
+    elseif m[j] == nc;
+	    mu_i = hj[j,.]'; @An (nc-1) vector@ @This needs to be a column vector for passing it to pdfmvn@
+		covj_i = covj[(mq[j]-1)*ncDiff+1:mq[j]*ncDiff,.]; @An (nc-1) by (nc-1) matrix@
+	    dummy =	zeros(rows(mu_i),1);
+		p1 = Jac[j]*pdfmvn(dummy, mu_i, covj_i); // pdfmvn is a function defined by the user
+		p2 = 1;
+		clear mu_i, covj_i;
+		
+	// Case 3: corner and interior solutions - both the joint normal pdf and joint normal cdf need to be calculated
+	else; @Where number of chosen alternative is greater than 1 and less than nc@
+		ch = seqa(1,1,(nc-1))' .* cq[j,.];   
+		ch = selif(ch',(ch' .!=0))';
+		nch = seqa(1,1,(nc-1))' .* (cq[j,.].==0);
+		nch = selif(nch',(nch' .!=0))';
+		@Finally ch and nch are row vectors@
+		
+			
+		@ha and hb needs to be a column vector for passing it to pdfmvn@
+		ha = hj[j,ch]'; //Contains the deterministic portion of the utility for the chosen alternatives without mq in a column vector 
+		hb = hj[j,nch]'; //Conatins the deterministic portion of the utility for the non-chosen alternatives in a column vector
+		covj_i = covj[(mq[j]-1)*ncDiff+1:mq[j]*ncDiff,.]; @Getting the appropriate (nc-1) by (nc-1) matrix@
+		
+		dummy = zeros(rows(ha),1);
+		p1 = Jac[j]*pdfmvn(dummy, ha, covj_i[ch,ch]);//The joint normal pdf of the chosen alternatives without mq
+		
+		//Calculation of the conditional mean and the conditional variance
+		mu_i = hb + covj_i[nch,ch]*inv(covj_i[ch,ch])*(-ha); @An nch by 1 vector@
+		omegacov = covj_i[nch,nch] - covj_i[nch,ch]*inv(covj_i[ch,ch])*covj_i[ch,nch]; //conditional covariance //An nch by nch matrix
+		omegacorr = corrvc(omegacov);
+		omegacorr = diagrv(omegacorr, ones(rows(hb),1)); //calculation of the correlation // GAUSS function corrvc() should work as well
+		mu_final = (-mu_i)./sqrt(diag(omegacov));
+		if rows(hb) == 1;
+			p2 = cdfn(mu_final);
+		elseif rows(hb)<3;
+			p2 = cdfBvn(mu_final[1],mu_final[2],omegacorr[1,2]);
+		else;
+			{p2,sq} = cdfmvna(mu_final',omegacorr,seedn);
+		endif;
+	endif; @End of check how may alternatives have been consumed@
+	p3[j] = p1*p2; 
+	seedn = sq;
+ else;
+	p3[j] = 1; 
+ endif; //End of check whether budget is greater than 0
+endfor; @End of looping over individual@
+
+ w1=zeros(e1,1);
+ if p3 > w1;
+     z1 = ln(p3);
+	 post_obs = ones(nobs,1);
+ else;
+     z1=ln(p3-((p3.<=w1).*(p3-0.0001)));
+	 post_obs = ((p3.<=w1).*0)+(p3.>w1);
+ endif;
+
+//print "meanc(selif(z1,(sumc(b').>0))): " meanc(selif(z1,(sumc(b').>0)));
+
+retp(wt.*z1);
+ //retp(0);
+endp;
+
+
+
+proc lgdnormBottom(x,dta, nc, nvarm, nvardel, nvargam, ivm, ivd, ivg, flagchm, eqmatdel, eqmatgam,numout,_new_max_active );
+ local e1,wt,xbase, xdel,xsigmm,xgam,xsd,xcov,v2,w2,u2,j,k, v,Vf, w,u,a,f,b,m,mq,cqq,cq,sel,Jac,e,d, dummy;
+ local covb,covn,ident,min1,p3,seedn,sq,app1,hj,zj,covj,corrj,p1,p2,ch,nch,ha,hb,mu,mu_final, omegacov,omegacorr,z1,count;
+ local beta_score, gamma_score, alpha_score, cov_score, iBeta, iGamma, iAlpha, iCov, gg, gg_temp, dummy_grad;
+ local cov_grad, cov_gradff, xbase_grad, xdel_grad, xgam_grad, v2_grad, w2_grad, u2_grad, v_grad, w_grad, u_grad, a_grad, f_grad, shi_r_unq, ishi;
+ local hj_grad, covj_grad, corrj_grad, ha_grad, hb_grad, mu_grad, mu_final_grad, omegacov_grad, omegacorr_grad, omega, omega_grad, cond_omega, cond_omega_grad;
+ local p1_grad, p1_grad_mean, p1_grad_cov, p2_grad, p1_gg, p2_gg;
+ local jac_grad1, jac_grad2, jac_grad2_top, jac_grad2_bottom, jac_grad, gradient;
+ local ncDiff, MBig, iden_matrix, one_negative, mu_i, covj_i, corrj_i, hj_i, mu_grad_i, hj_grad_i, covj_inv, om, Vf1, errDiff;
+ local hj_grad1, v_gradG, mq_big, Vf_grad, cov_gradf, cov_gradfff, omegaArr, covjA1, covjA2, omegai, corrj_grad1, omega_grad1;
+ local covjGradVech, mu_grad2, mu_grad2_i, shi_r_unq_i, covj_grad_i, covj_grad_inv, cov_grad_i2;
+ local covj_grad_ch, covj_grad_nch, covj_grad_nch_ch, covj_iarray, covj_invarray, mu_final_grad2, omega_grad_n, mu_iarray, ha_array;
+ local covj_grad_array, covj_grad_ch_nch, v_gradA, wBig, jac_gradG, jac_gradA, ncov;
+ local nobs;   // These are local copies of nobs and local copies of _max_active; they do not interfere with global copies of nobs and global copies of _max_active
+ local jac_grad1_denom;
+ 
+ e1 = rows(dta);  nobs = e1; //e1 contains the number of observations
+ wt = dta[.,wtind]; //Get the weight in a column
+ xbase = x[1:nvarm]; //Baseline coefficients
+ xdel  = eqmatdel'*(-1000); //print "xdel: " xdel;//Converts the no. of alpha parameters to be estimated to the total no. of alternatives, nc
+ xgam  = eqmatgam'*x[nvarm+1:nvarm+nvargam]; //print "xgam: " xgam;//same as above
+ xcov  = upmat(xpnd(x[nvarm+nvargam+1:nvarm+nvargam+(nc*(nc+1)/2)])); //print "xcov: " xcov;//Get the cholesky factors - the upper triangular matrix
+ @xcov is an upper triangular matrix@
+ 
+ //_max_active = _new_max_active;  @This _max_active is aligned with the parameters@
+ 
+//covariance matrix errors//xcov contains the upper triangle of the Cholesky factor
+ ncov = nc*(nc+1)/2;
+ covn = xcov'*xcov;
+ 
+ //multiply the variables with the appropriate betas for all the alternatives
+ v2 = (ones(nc,1) .*. xbase)*~(dta[.,ivm])';
+ w2 = (ones(nc,1) .*. xdel)*~(dta[.,ivd])'; //For alpha
+ u2 = (ones(nc,1) .*. xgam)*~(dta[.,ivg])'; //For gamma
+ 
+//Sum the deterministic portion of the utility, alpha and gamma
+ j=1;
+ v = {};
+ w = {};
+ u = {};
+ do until j == nc+1;
+   v = v~(sumc(v2[(j-1)*nvarm+1:(j*nvarm),.]));			// beta*zeta deterministic
+   w = w~(sumc(w2[(j-1)*nvardel+1:(j*nvardel),.]));		// alpha
+   u = u~(sumc(u2[(j-1)*nvargam+1:(j*nvargam),.]));		// gamma
+   j = j+1;
+ endo;
+ //At the end of the loop, v, w and u are nobs x nc matrices
+
+ clear v2,w2;
+ a = exp(w);		
+ if _alp0to1;
+   a = 1/(1+exp(w)); 		// a is 1-alpha
+ endif;
+ 
+ f = exp(u);				// gamma
+ b = dta[.,flagchm] .> 0;	// 1 if chosen, 0 if not //A nobs x nc matrix
+ m = sumc(b');				// number of chosen alternatives  //an nobs x 1 column vector
+ 
+ // Identifying alternative mq
+ mq = b.* (seqa(1,1,nc))'; //Convert the 1's into the serial number of the alternatives
+ mq = substute(mq,b.==0,nc+1); //Give a number greater than the total number of alternatives to the unchosen alternatives
+ mq = minc(mq'); //Select the id of the first chosen alternative //mq is a nobs x 1 column vector
+ 
+ @Added to correct for the fact that, to correct for the fact that, mq is (nc+1) for ind who did not chose any alternatives in the bottom nest@
+ mq = (mq .* (sumc(b').> 0)) + ((sumc(b').== 0) .* 2);
+ 
+ Vf = zeros(e1,nc);
+ //All the matrices in this equation are nobs x nc, must require the use of dot operator
+ Vf[.,1:numout] = v[.,1:numout]-a[.,1:numout].*ln((dta[.,flagchm[1:numout]]+f[.,1:numout]))-ln(ones(e1,numout));	// deterministic component V //An nobs by nc matrix
+ Vf[.,numout+1:nc] = v[.,numout+1:nc]-a[.,numout+1:nc].*ln((dta[.,flagchm[numout+1:nc]]+f[.,numout+1:nc])./f[.,numout+1:nc])-ln(ones(e1,(nc-numout)));	// deterministic component V //An nobs by nc matrix
+ //Vf = v-a.*ln((dta[.,flagchm]+f)./f)-ln(dta[.,flagprcm]);
+ 
+ // Taking differences w/r to alternative mq
+ cqq = reshape(((seqa(1,1,nc).*.ones(1,nobs)))', nobs*nc, 1 ); //cqq is a column of the seq of alternative numbers repeated nobs times
+ cq = reshape(b, nobs*nc, 1 ); //Convert b into a column, where the seq is the participation indicator for 1st obs then for second observation and so on
+ sel = cqq.*(cqq .!= (mq.*.ones(nc,1)));
+ cq = reshape(selif(cq, cqq .== sel), nobs, nc-1); //cq is b arranged an nobs x (nc- 1) matrix //alternatives are 1 0 with 1 for selected and 0 for non-selected
+ 
+ // Jacobian computation - not dividing by the price of mq, 
+ //Correct if no price variation - need to correct if there is price variation
+ Jac = (a.*b)./((dta[.,flagchm]+f));
+ Jac = Jac./(ones(e1,nc)); 
+ Jac = substute(Jac,b.==0,1); //
+ e = (1/Jac).*b;  //nobs x nc matrix
+ d = sumc((e'));//nobs x 1, the summation portion of the Jacobian
+ Jac = (prodc((Jac'))).*d; //An nobs by 1 matrix
+  
+ //Create the Big M matrix //Only needs to be created nc times instead of nobs times
+ ncDiff = (nc-1); @How many rows in each chunk of M@
+ MBig = zeros(ncDiff*nc,nc);
+ iden_matrix = eye(nc-1);
+ one_negative = -ones(nc-1,1);
+   
+  for im(1,nc,1);
+	if(im eq 1);
+		MBig[((im-1)*ncDiff+1):im*ncDiff,.] = one_negative ~ iden_matrix; @First column is filled up by -1, the rest of the matrix is filled up by (nc-1) identity matrix@
+	elseif(im eq nc);
+		MBig[((im-1)*ncDiff+1):im*ncDiff,.] = iden_matrix ~ one_negative;	@Last column is filled up by -1, the rest of the matrix is filled up by (nc-1) identity matrix@
+	else;
+		MBig[((im-1)*ncDiff+1):im*ncDiff,.] = iden_matrix[.,1:im-1] ~ one_negative ~ iden_matrix[.,im:nc-1]; @Choice column filled up by -1@
+	endif;
+  endfor;
+ @END OF CREATING MBig@
+ 
+ @NEXT CREATE hj, covj, corrj, om - ALL OF THESE WILL VARY BY WHICH ALTERNATIVE IS CHOSEN@
+ hj = zeros(nobs,(nc-1)); @This will hold the differenced mean@
+ mu = zeros(nobs,(nc-1)); @This will hold the differenced mean divided by the stadard deviation@
+ covj = zeros((nc-1)*nc,(nc-1)); @Variance covariance matrix of the differenced error@
+ corrj = zeros((nc-1)*nc,(nc-1)); @Error correlation matrix of the differenced error@
+ om = zeros(nc,(nc-1)); @To hold the diagonal elements of the error difference matrix@
+ 
+ @mq is a column vector that holds the first chosen alternative for an individual@
+ @m is a column vector that contains the number of chosen alternatives for an individual@
+ for i(1,nc,1);
+	@Get the M depending on the choice of the alternative@
+	app1 = MBig[(i-1)*ncDiff+1:i*ncDiff,.]; @Get the appropriate M depending on which alternative has been chosen@
+	Vf1 = (app1*Vf')'; @Utility is a nobs by nc matrix@ @Direct product will have nobs rows and nc columns@
+	hj = hj + (Vf1 *~ (mq .== i)); @This is an nobs by (nc-1), appropriately created depending on which alternative has been chosen@
+	errDiff = app1*covn*app1'; @The error difference matrix@
+	covj[(i-1)*ncDiff+1:i*ncDiff,.] = errDiff;   
+	om[i,.] = diag(errDiff)'; @After taking square root making it a row vector@ @sqrt has not bee taken@
+	mu = mu + ((hj *~ (mq .== i)) ./sqrt(om[i,.])); @Mean divided by the square root of variance, considering the first chosen alternative@
+	corrj[(i-1)*ncDiff+1:i*ncDiff,.] = diagrv(corrvc(errDiff),ones(nc-1,1)); @corrj is the correlation matrix for error variance covariance matrix@
+	clear Vf1, errDiff;
+ endfor;
+ @After end of this loop, hj is a nobs by (nc-1) matrix, and covj is a (nc-1)*nc by (nc-1) matrix, @
+ @Now in the rest of the likelihood code all that you need to do is to pick the right covj, corrj, hj and mu@  
+ 
+ //GRADIENT WITH RESPECT TO BETA, ONLY AFFECTS THE DETERMINISTIC PORTION OF THE UTILITY
+  
+ @In each column, one element is one, the rest of them are zero@ @Multiplying by _max_active, takes care of the active parameter@
+ beta_score = eye(nvarm) *~ _new_max_active[1:nvarm];
+ xbase_grad = ones(nc,1) .*. beta_score; @Next repeat the full chunk of beta_score nc times@ 
+ v2_grad = (dta[.,ivm])' *~ xbase_grad; //This matrix will have nvarm*nc rows, each nvarm chunk for one beta param, nvarm*nobs columns, each nvarm chunk for each individual
+		 
+ //GRADIENT WITH RESPECT TO ALPHA
+ /*alpha_score = eye(rows(eqmatdel)) *~ _max_active[nvarm+1:nvarm+rows(eqmatdel)];
+ alpha_score = eqmatdel' * alpha_score; @Converting it from number of parameters to number of alternatives@
+ xdel_grad =  ones(nc,1) .*. alpha_score; @Repeating each block of alpha_score nc times@
+ w2_grad = dta[.,ivd]' *~ xdel_grad; @Will have nvardel*nc rows and nvardel*nobs columns@*/
+ 
+ 
+ //GRADIENT WITH RESPECT TO GAMMA, ONLY AFFECTS THE DETERMINISTIC PORTION OF THE UTILITY AS WELL AS THE JACOBIAN
+ 
+ gamma_score = eye(rows(eqmatgam)) *~ _new_max_active[nvarm+1:nvarm+rows(eqmatgam)]; @Each column corresponds to the derivative with respect to one gamma@ @Also multiply by _max_active to make the ones zero that are not active@
+ gamma_score = eqmatgam'*gamma_score; @Converting it from number of parameters to number of alternatives@ @In case eqmatgam is eye there is no effect@
+ xgam_grad = ones(nc,1) .*. gamma_score; @Repeating the block of gamma score nc times@
+ u2_grad = dta[.,ivg]' *~ xgam_grad; @u2_grad will have nvargam*nc rows and nvargam*nobs columns@
+ 
+ /**************************************************************************************************************************/
+
+ j = 1;
+ v_grad = {};	
+ u_grad = {};
+ w_grad = {};
+ do until j == nc+1;
+	v_grad = v_grad~(sumc(v2_grad[(j-1)*nvarm+1:(j*nvarm),.]));			// beta*zeta deterministic
+	u_grad = u_grad~(sumc(u2_grad[(j-1)*nvargam+1:(j*nvargam),.]));
+	//w_grad = w_grad~(sumc(w2_grad[(j-1)*nvardel+1:(j*nvardel),.]));
+	j = j+1;
+endo; 
+//v_grad is a (nvarm*nobs) rows, each chunk of nvarm rows for one nvarm parameters and nc columns
+//u_grad is a (nvargam*nobs) rows, each chunk of nvargam rows for one gamma parameter and nc columns 
+//w_grad is a (nvardel*nobs) rows, each chunk of nvardel rows for one alpha parameter and nc columns 
+ 
+  /*wBig = exp(w) .*. ones(1,1); @Repeating w for each individual nvardel times@ @An nvardel*nobs by nc matrix@
+  a_grad = wBig.*w_grad; //An (nvardel*nobs) x nc matrix	//The Kronecker product will repeat each row nvardel times	
+  if _alp0to1;
+	a_grad = -(wBig.*(w_grad))./(1+wBig)^2; 		// a is 1-alpha
+  endif;*/
+ 
+  @This is the gradient of the deterministic portion of the utility with respect to gamma parameter@
+  v_gradG = (((dta[.,flagchm].*a).*.ones(nvargam,1)).*u_grad)./((dta[.,flagchm]+f).*.ones(nvargam,1)); @v_gradG i s a nvargam*nobs by nc matrix@
+  //v_gradA = -a_grad .* ((ln((dta[.,flagchm]+f)./f)) .*. ones(1,1));
+  
+  /*v_gradA = zeros(e1,nc);
+  v_gradA[.,1:numout] = -a_grad[.,1:numout] .* ((ln((dta[.,flagchm[1:numout]]+f[.,1:numout]))) .*. ones(1,1)); @An nvardel*nobs by nc matrix, each block of nvardel is for one alpha parameter@
+  v_gradA[.,numout+1:nc] = -a_grad[.,numout+1:nc] .* ((ln((dta[.,flagchm[numout+1:nc]]+f[.,numout+1:nc])./f[.,numout+1:nc])) .*. ones(1,1)); @An nvardel*nobs by nc matrix, each block of nvardel is for one alpha parameter@	
+ */
+ 
+  //CALCULATION OF GRADIENT OF THE JACOBIAN
+  //WITH RESPECT TO GAMMA PARAMETERS
+  f_grad = (f .*. ones(nvargam,1)).*u_grad; //An (nvargam*nobs) x nc matrix @This is the gradient of u wrt gamma parameters@
+  
+  jac_grad1_denom = substute((dta[.,flagchm]+f),(dta[.,flagchm]+f).==0,1);  
+  //jac_grad1 = sumc(((-f_grad./((dta[.,flagchm]+f).*.ones(nvargam,1))).*(b.*.ones(nvargam,1)))'); //An (nvargam*nobs) x 1 matrix
+  jac_grad1 = sumc(((-f_grad./(jac_grad1_denom.*.ones(nvargam,1))).*(b.*.ones(nvargam,1)))'); //An (nvargam*nobs) x 1 matrix
+  jac_grad2_top = sumc(((f_grad./(a.*.ones(nvargam,1))).*(b.*.ones(nvargam,1)))'); //(nvargam*nobs) x 1 matrix
+  
+  //jac_grad2_bottom = (sumc((((dta[.,flagchm]+f)./a).*b)')).*.ones(nvargam,1); //(nvargam*nobs) x 1 matrix
+
+  @Making some changes here@
+  jac_grad2_bottom = (sumc((((dta[.,flagchm]+f)./a).*b)'));  
+  jac_grad2_bottom = substute(jac_grad2_bottom,jac_grad2_bottom.==0,1);  
+  jac_grad2_bottom = jac_grad2_bottom .*. ones(nvargam,1);  //(nvargam*nobs) x 1 matrix
+  @End of making changes@
+  
+  jac_grad2 = jac_grad2_top ./ jac_grad2_bottom; //(nvargam*nobs) x 1 matrix
+  jac_gradG = jac_grad1 + jac_grad2; //(nvargam*nobs) x 1 matrix
+  jac_gradG = reshape(jac_gradG, nobs, nvargam); @Making it a nobs by nvargam matrix@	
+  @jac_grad holds the gradient of the ln of the jacobian with respect to u, which is the parameter underlying the gamma parameter@
+  clear jac_grad1, jac_grad2_top, jac_grad2_bottom, jac_grad2;
+  
+  //WITH RESPECT TO ALPHA PARAMETERS
+ /* if (_alp0to1 == 0);
+		jac_grad1 = sumc((w_grad.*(b .*. ones(1,1)))'); //An 1*nobs x 1 matrix //Each chunk of 1 is for one alpha parameter
+		jac_grad2_top = sumc((((((dta[.,flagchm]+f) .*. ones(1,1)).*(-w_grad))./wBig).*(b .*. (ones(1,1))))'); //1*nobs x 1 matrix each chunk of nvardel is for one alpha parameter
+		jac_grad2_bottom = sumc(((((dta[.,flagchm]+f) .*. ones(1,1))./wBig).*(b .*. (ones(1,1))))'); //1*nobs x 1 matrix, each chunk of nvardel is for one alpha parameter
+		jac_grad2 = jac_grad2_top ./ jac_grad2_bottom; //1*nobs x 1 matrix //Each chunk is for one 1 parameter
+		jac_gradA = jac_grad1 + jac_grad2; //1*nobs x 1 matrix
+  elseif (_alp0to1 == 1);
+		jac_grad1 = sumc(((((-exp(w)./(1+exp(w))) .* b) .*. ones(1,1)).*w_grad)'); //An 1*nobs x 1 matrix
+		jac_grad2_top = sumc(((((dta[.,flagchm]+f).*b) .*. ones(1,1)).*w_grad.*wBig)'); //1*nobs x 1 matrix
+		jac_grad2_bottom = sumc(((((dta[.,flagchm]+f).*b).*.ones(1,1)).*(1+wBig))'); //1*nobs x 1 matrix
+		jac_grad2 = jac_grad2_top ./ jac_grad2_bottom;//nobs x 1 vector
+		jac_gradA = jac_grad1 + jac_grad2; //1*nobs x 1 vector
+		jac_gradA = reshape(jac_gradA, nobs, 1); @Making it a nobs by 1 matrix@
+ endif;
+ clear jac_grad1, jac_grad2_top, jac_grad2_bottom, jac_grad2;
+ */
+ 
+//GRADIENT WITH RESPECT TO CHOLESKY
+ cov_score = eye(ncov) *~ _new_max_active[nvarm+rows(eqmatgam)+1:nvarm+rows(eqmatgam)+ncov]; @@
+ 
+ @Create cov_grad array@ @To hold the variance covariance matrix of error wrt ncov parameters@
+ cov_gradf = arrayinit(ncov|nc|nc,0); @Initialize all the array elements with zero@
+ for i(1,ncov,1); @COULD NOT FIND ANY OTHER WAY TO CREATE THE LAMDAD MATRIX FOR THE TIME BEING, WITHOUT LOOPING THROUGH THE NCHOLERR PARAMETER VECTOR@  
+	 if(_new_max_active[nvarm+rows(eqmatgam)+i] .== 0); @That is if the parameter is  inactive@
+	 else; @If the ncov parameter is active@
+	 cov_grad = upmat(xpnd(cov_score[.,i])); @Making a upper triangular matrix@
+	 cov_grad = cov_grad'*xcov + xcov'*cov_grad;
+	 setarray cov_gradf, i, cov_grad; @cov_grad is nc by nc dimenssional@ 
+	endif;
+ endfor; @This is the end of creation of the derivative of the cholesky factors@
+ @cov_gradf is ncov by nc by nc array, each plane holds one nc by nc matrix of the gradient of the cholesky of the error term@
+ //print "cov_gradf: " cov_gradf;
+
+ /********NEXT WE NEED TO MULTIPLY COV_GRADF WITH M***********************************************************/
+ cov_gradfff = arrayinit((nc|ncov|(nc-1)|(nc-1)),0); @Vary by chosen alternative, by ncov parameters@
+ corrj_grad = arrayinit((nc|ncov|(nc-1)|(nc-1)),0); @The (nc-1) by (nc-1) correlation matrix will be stored here, for each nc for each ncov@
+ omega_grad = arrayinit((nc|ncov|(nc-1)|1),0); @An nc by ncov by (nc-1) by 1 array@
+ covjGradVech = zeros(ncov*nc,nc*(nc-1)/2); @Will hold the vectorize portion of the full variance covariance matrix for ncov parameters and nc M values@
+ shi_r_unq = zeros(ncov*nc,(nc-1)*(nc-2)/2); @Will hold the upper triangle of corrj_grad without diagonals@  
+ for i(1,nc,1); @Need to loop through M@
+	 covjA1 = covj[(i-1)*ncDiff+1:i*ncDiff,.]; @This is an (nc-1) by (nc-1) variance covariance matrix@
+	 covjA2 = areshape(covjA1, ncov|(nc-1)|(nc-1)); @Repeating it ncov times in the covjA2 array@
+	 omegai = om[i,.]'; @Making it a column vector@ @An (nc-1) column vector@ @This is the diagonal of the variance covariance matrix@
+	 omegai = areshape(omegai,ncov|(nc-1)|1); @An ncov by (nc-1) by 1 array@
+	 app1 = MBig[(i-1)*ncDiff+1:i*ncDiff,.]; @Taking the appropriate M@
+	 app1 = areshape(app1,ncov|(nc-1)|nc); @So app1 is now an array of size ncov by (nc-1) by nc@
+	 cov_gradff = amult(amult(app1,cov_gradf),atranspose(app1,1|3|2)); @After first amult the array is of size ncov by (nc-1) by nc@@cov_gradff is of size ncov by (nc-1) by (nc-1)@
+	 omega_grad1 = diag(cov_gradff); @An ncov by (nc-1) by 1 array@
+	 corrj_grad1 = (atranspose((cov_gradff./sqrt(omegai)),1|3|2)./sqrt(omegai)) - 0.5 .* ((atranspose(((covjA2 ./(sqrt(omegai).*(omegai))) .* omega_grad1 ),1|3|2) ./(sqrt(omegai)))   + ((atranspose((covjA2 ./(sqrt(omegai))),1|3|2) ./(sqrt(omegai).*omegai)) .* omega_grad1 )) ;
+	 
+	 for j(1,ncov,1);
+		 if(_new_max_active[nvarm+rows(eqmatgam)+j]==0);
+			 covjGradVech[(i-1)*ncov+j,.] = zeros(1,nc*(nc-1)/2); 
+			 shi_r_unq[(i-1)*ncov+j,.] = zeros(1,(nc-1)*(nc-2)/2);
+		 else;
+			covjGradVech[(i-1)*ncov+j,.] = vech(arraytomat(getarray(cov_gradff,j)))'; @After vech its a column vectore, making it a row vector@
+			shi_r_unq[(i-1)*ncov+j,.] = (packr(vecr(arraytomat(getarray(corrj_grad1,j))) + vecr(miss(lowmat(reshape(99999,(nc-1),(nc-1))),99999))))';
+		endif;
+	 endfor;
+	 setarray cov_gradfff, i, cov_gradff;
+	 setarray corrj_grad, i, corrj_grad1;
+	 setarray omega_grad, i, omega_grad1;
+	clear app1, cov_gradff, covjA1, covjA2, omegai,cov_gradff, omega_grad1, corrj_grad1;
+ endfor;	
+ @cov_gradfff is a nc by ncov by (nc-1) by (nc-1) array@ @This holds the gradient of the variance covariance matrix@
+ /************END OF CREATION OF THE GRADIENT WITH RESPECT TO NCOV*******************************************************/
+ /************************************************************************************************************************/
+ 
+ v_grad = reshape(v_grad,nobs, nc*nvarm);    @Will have nobs rows and nc*nvarm columns@ @Each nc chunk is for one nvarm param@
+ v_gradG = reshape(v_gradG,nobs,nvargam*nc); @Wil have nobs rows and nc*nvargam columns@ @Each nc chunk is for one nvargam param@
+ //v_gradA = reshape(v_gradA,nobs,1*nc); @Will have nobs rows and nvardel*nc columns@ @Each chunk of nc is for one nvardel parameter@
+ //Vf_grad = v_grad~v_gradA~v_gradG; @Row conacatenation@ @Will have nc*nvarm + nc*nvargam columns and nobs rows@
+ //Vf_grad = reshape(Vf_grad, (nvarm+1+nvargam)*nobs,nc); @Will have (nvarm+nvardel+nvargam)*nobs rows and nc columns@ @First chunk of (nvarm+nvardel+nvargam) for 1st individual and so on@
+ Vf_grad = v_grad~v_gradG; @Row conacatenation@ @Will have nc*nvarm + nc*nvargam columns and nobs rows@
+ Vf_grad = reshape(Vf_grad, (nvarm+nvargam)*nobs,nc); @Will have (nvarm+nvardel+nvargam)*nobs rows and nc columns@ @First chunk of (nvarm+nvardel+nvargam) for 1st individual and so on@
+ 
+ @Both hj_grad and mu_grad are (nvarm+nvardel+nvargam)*nobs by (nc-1) matrices, each nvarm chunk is for one beta coefficient, then one gamma@
+ @Next we need to create the hj_grad, mu_grad, ha_grad & hb_grad@		
+ hj_grad = zeros(((nvarm+nvargam)*nobs),(nc-1)); @Each chunk of nvarm is for one beta coefficient@ @This is the mean w/o dividing by the standard deviation@
+ mu_grad = zeros(((nvarm+nvargam)*nobs),(nc-1)); @Each chunk of nvarm is for one beta coefficient@ @This is the mean divided by the standard deviation@
+ mu_grad2 = zeros(ncov*nobs,(nc-1)); @Will hold the gradient of mu with respect to the ncov parameters@
+ mq_big = (mq .*. ones(nvarm+nvargam,1)); @mq_big has nvarm*nobs +nvargam*nobs rows@
+ for i(1,nc,1);
+	 app1 = MBig[(i-1)*ncDiff+1:i*ncDiff,.]; @Get the appropriate M depending on which alternative has been chosen@
+	 hj_grad1 = (app1*Vf_grad')';  @Repeating ALt_chosen nvarm times@ @mq holds the chosen alternative@
+	 hj_grad = hj_grad + (hj_grad1 *~ (mq_big.== i)); @hj_grad is a nvarm*nobs by (nc-1) matrix@ @Appropriate for the chosen alternative@  
+	 mu_grad = mu_grad + (hj_grad *~ (mq_big.== i))./sqrt(om[i,.]); 
+	 @Creation of mu_grad2, derivative of mu wrt ncov parameters@
+	 omega_grad_n = arraytomat(areshape(getarray(omega_grad,i),ncov|(nc-1))); @Getting the omega_grad which is an ncov by (nc-1) matrix@
+	 mu_grad2 = mu_grad2 + 0.5 .*(((hj *~(mq .== i)).*.ones(ncov,1)).*(ones(nobs,1) .*. omega_grad_n))./(sqrt(om[i,.]).*om[i,.]);
+	 clear hj_grad1, app1, omega_grad_n;
+ endfor;
+ @Both mu_grad and hj_grad are (nvarm+nvardel+nvargam)*nobs by (nc-1) matrices, mu_grad2 is a ncov*nobs by (nc-1) matrix, each chunk of ncov is for one individual@
+  
+ @CALCULATE THE LOG LIKELIHOOD FUNCTION@ @AT THIS STAGE STORE THE PROBABILITIES AND GRADIENT, DONT WORRY ABOUT THE GRADIENT OF THE ERROR AT THIS POINT@ 
+ seedn = seednext; //A different seed is used for each individual, across iterations the seed remain the same
+ sq = seedn;
+ 
+ gg_temp = {};//The score for each individual is concatenated in gg_temp 
+  j=1;//Begining of the loop through the individual
+  do while j <= nobs;
+	@CHECK OF WHETHER THE BOTTOM NEST ALTERNATIVE HAS BEEN CHOSEN@
+ if (sumc(b[j,.]') > 0);	
+  // Case 1: only corner solutions - only one alternative is chosen - only joint normal cdf needs to be calculated
+  if m[j] == 1;
+    mu_i = -mu[j,.]; @An (nc-1) vector, corrected for the choice alternative and divided by standard deviation@ @mu_i is already a row vector@				
+	corrj_i = corrj[(mq[j]-1)*ncDiff+1:mq[j]*ncDiff,.];
+	mu_grad_i = (-mu_grad[(j-1)*(nvarm+nvargam)+1:j*(nvarm+nvargam),.]); @mu_grad_i is a nvarm+nvardel+nvargam by (nc-1) matrix@
+	mu_grad2_i = mu_grad2[(j-1)*ncov+1:j*ncov,.]; @An ncov by (nc-1) matrix@
+	shi_r_unq_i = shi_r_unq[(mq[j]-1)*ncov+1:mq[j]*ncov,.]; @This is a ncov by (nc-1)*(nc-2)/2 matrix@
+	
+	if (nc-1) eq 1;
+		p2 = cdfn(mu_i);
+		p2_grad = pdfn(mu_i);  @In this case p2_grad is just a scalar@
+	elseif (nc-1) eq 2;
+		p2 = cdfBvn(mu_i[1],mu_i[2],corrj_i[1,2]); 
+		p2_grad = cdfbvn_grad(mu_i[1],mu_i[2],corrj_i[1,2]); //Returns column vector
+		p2_grad = p2_grad';	//Making it a row vector
+	else;
+		{ p2, p2_grad, sq } = pdfmvna(mu_i,corrj_i,seedn);	 @Here p2_grad  is a row vector@
+	endif;
+					
+	gg = ((1/p2) .* ((p2_grad[1:(nc-1)] * mu_grad_i')))~ //This is a (nvarm+nvardel+nvargam) vector
+	((1/p2) .*((p2_grad[1:(nc-1)]*mu_grad2_i')+ (p2_grad[nc:cols(p2_grad)]*shi_r_unq_i')));	//The next portion is a 1 by ncov vector
+		
+	clear mu_i, corrj_i, p1,p2, p1_grad, p2_grad, mu_grad_i, mu_grad2_i, shi_r_unq_i;
+	
+	// Case 2: only interior soultions - all the available alternatives are chosen - only a joint normal pdf needs to be calculated
+   elseif m[j] == nc;
+		hj_i = hj[j,.]'; @Here we need hj without dividing by the standard deviation@ @hj_i is a 1 by (nc-1) vector@ @Making it a column vector@
+		covj_i = covj[(mq[j]-1)*ncDiff+1:mq[j]*ncDiff,.];
+		hj_grad_i = hj_grad[(j-1)*(nvarm+nvargam)+1:j*(nvarm+nvargam),.]; @An (nvarm+nvardel+nvargam) by (nc-1) matrix@
+		covj_grad_i = covjGradVech[(mq[j]-1)*ncov+1:mq[j]*ncov,.]; @an ncov by nc*(nc-1)/2@
+		dummy = zeros(rows(hj_i),1);
+		
+		p1 = pdfmvn(dummy, hj_i, covj_i); 
+		p1_grad_mean = pdfgmean(dummy,hj_i,covj_i); @Returns a column vector@
+		p1_grad_cov = pdfgcov(dummy,hj_i,vech(covj_i)); @Returns column vector@
+				
+		gg = (1/p1) .* ((p1_grad_mean[1:(nc-1)]'*(-hj_grad_i)') ~ //gg is a 1 by (nvarm+nvardel+nvargam) vector
+						(p1_grad_cov'*covj_grad_i')); // 2nd portion is a 1 by ncov vector
+		clear dummy, p1, hj_i, covj_i, p1_grad_mean, p1_grad_cov, hj_grad_i, covj_grad_i;
+	
+	// Case 3: corner and interior solutions - both the joint normal pdf and joint normal cdf need to be calculated
+	else;
+		ch = seqa(1,1,(nc-1))' .* cq[j,.];
+		ch = selif(ch',(ch' .!=0))';
+		nch = seqa(1,1,(nc-1))' .* (cq[j,.].==0);
+		nch = selif(nch',(nch' .!=0))';
+		@Finally ch and nch are row vectors@
+		
+		@Make both of them column vectors@
+		ha = hj[j,ch]'; //Contains the deterministic portion of the utility for the chosen alternatives without mq in a column vector 
+		hb = hj[j,nch]'; //Conatins the deterministic portion of the utility for the non-chosen alternatives in a column vector
+		covj_i = covj[(mq[j]-1)*ncDiff+1:mq[j]*ncDiff,.]; @Getting the appropriate (nc-1) by (nc-1) matrix@
+		
+		@Gradient with respect to mean parameters@
+		ha_grad = hj_grad[(j-1)*(nvarm+nvargam)+1:j*(nvarm+nvargam),ch]; @ha_grad is a nvarm by ch matrix@
+		hb_grad = hj_grad[(j-1)*(nvarm+nvargam)+1:j*(nvarm+nvargam),nch]; @hb_grad is a nvarm by nch matrix@
+		
+		dummy = zeros(rows(ha),1);
+		
+		p1 = pdfmvn(dummy, ha, covj_i[ch,ch]);//The joint normal pdf of the chosen alternatives without mq
+		p1_grad_mean = pdfgmean(dummy,ha,covj_i[ch,ch]); @p1_grad_mean is a column vector@
+		p1_grad_cov = pdfgcov(dummy,ha,vech(covj_i[ch,ch])); @p1_grad_cov is a column vector@
+		@The derivative of the mean wrt ncov parameter is zero@
+		
+		//Calculation of the conditional mean and the conditional variances
+		covj_inv = inv(covj_i[ch,ch]); @Take the inverse just once@
+		mu_i = hb + covj_i[nch,ch]*covj_inv*(-ha); @mu_i is nch by 1@
+		omegacov = covj_i[nch,nch] - covj_i[nch,ch]*covj_inv*covj_i[ch,nch]; //conditional covariance //An nch by nch matrix
+		cond_omega = diag(omegacov); @This is an nch by 1 vector@
+		cond_omega = areshape(cond_omega,ncov|(cols(nch)|1));
+		omegacorr = corrvc(omegacov); //calculation of the correlation // GAUSS function corrvc() should work as well
+		omegacorr = diagrv(omegacorr,ones(rows(hb),1));
+		mu_final = (-mu_i)./sqrt(diag(omegacov)); @mu_final is nch by 1@
+		
+		@Making ha_grad ch by (nvarm+nvargam) matrix@ @The 2nd portion of summation is a nch by (nvarm+nvargam) matrix@ @Making hb_grad nch by (nvarm+nvargam)@
+		mu_grad_i = hb_grad' + (covj_i[nch,ch]*covj_inv)*(-ha_grad)'; @mu_grad_i is nch by nvarm matrix@
+		mu_final_grad = (-mu_grad_i)./sqrt(diag(omegacov)); @Element by element operation@ @after taking square root st. dev. is a column vector@
+		@End of calculation of mu_final grad for mean parameters@
+		
+		@Calculation of derivative for ncov parameters@
+		covj_grad_array = getarray(cov_gradfff,mq[j]);
+		covj_grad_nch = covj_grad_array[.,nch,nch];
+		covj_grad_nch_ch = covj_grad_array[.,nch,ch];
+		covj_grad_ch = covj_grad_array[.,ch,ch];
+		covj_grad_ch_nch = covj_grad_array[.,ch,nch];
+		
+		covj_iarray = areshape(covj_i,ncov|(nc-1)|(nc-1)); //print "getorders(covj_iarray): " getorders(covj_iarray);
+		covj_invarray = areshape(covj_inv,ncov|cols(ch)|cols(ch)); @covj_inv is already a ch by ch matrix@ //print "getorders(covj_invarray): " getorders(covj_invarray);
+		
+		@This is the conditional variance covariance matrix, stored in an ncov by nch by nch array, each plane is for one ncov parameter@
+		
+		omegacov_grad = 
+		covj_grad_nch - 
+		amult(amult(covj_grad_nch_ch,covj_invarray),covj_iarray[.,ch,nch])+
+		amult(amult(amult(amult(covj_iarray[.,nch,ch],covj_invarray),covj_grad_ch),covj_invarray),covj_iarray[.,ch,nch]) - 
+		amult(amult(covj_iarray[.,nch,ch],covj_invarray),covj_grad_ch_nch); @this is a ncov by nch by nch array@
+		
+		cond_omega_grad = diag(omegacov_grad); @omegacov_grad is a ncov by nch by 1 array@
+		omegacov = areshape(omegacov,ncov|cols(nch)|cols(nch));
+		omegacorr_grad = (atranspose((omegacov_grad./sqrt(cond_omega)),1|3|2)./sqrt(cond_omega)) - 0.5 * ( atranspose((omegacov ./(sqrt(cond_omega).*(cond_omega)) .* cond_omega_grad ),1|3|2) ./(sqrt(cond_omega))   + ((atranspose((omegacov ./(sqrt(cond_omega))),1|3|2 )) ./(sqrt(cond_omega).*(cond_omega))) .* cond_omega_grad ) ;
+		@omegacorr_grad is a ncov by nch by nch array@
+		
+		@Gradient of the conditional mean@
+		ha_array = areshape(ha,ncov|cols(ch)|1);
+		mu_iarray = areshape(mu_i,ncov|cols(nch)|1); @Conditional mean, ncov by nch by 1@
+		@mu_grad2_i is ncov by cols(nch) by 1 array@
+		mu_grad2_i = amult(amult(covj_grad_nch_ch,covj_invarray),(-ha_array)) - amult(amult(amult(amult(covj_iarray[.,nch,ch],covj_invarray),covj_grad_ch),covj_invarray),(-ha_array));
+		mu_final_grad2 = ((-sqrt(cond_omega) ).* mu_grad2_i + 0.5 .*mu_iarray.*cond_omega_grad ./ sqrt(cond_omega) ) ./ (cond_omega); //mu_final_grad is a row vector
+		mu_final_grad2 = arraytomat(areshape(mu_final_grad2,ncov|cols(nch)));
+		
+		shi_r_unq_i = zeros(ncov,,maxc((cols(nch)*(cols(nch)-1)/2)|1));
+		covj_grad_i = zeros(ncov,cols(ch)*(cols(ch)+1)/2);
+		for i(1,ncov,1);
+			if(_new_max_active[nvarm+rows(eqmatgam)+i] == 0);
+				covj_grad_i[i,.] = zeros(1,cols(ch)*(cols(ch)+1)/2);
+				shi_r_unq_i[i,.] = zeros(1,maxc((cols(nch)*(cols(nch)-1)/2)|1));@An nch by nch matrix@
+			else;
+				cov_grad_i2 = arraytomat(getarray(cov_gradfff,(mq[j]|i)));
+				covj_grad_i[i,.] = vech(cov_grad_i2[ch,ch])';
+				shi_r_unq_i[i,.] = packr((vecr((arraytomat(getarray(omegacorr_grad,i)))) + vecr(miss(lowmat(reshape(99999,cols(nch),cols(nch))),99999))))'; @An nch by nch matrix@
+				clear cov_grad_i2;
+			endif;
+		endfor;
+		
+		if rows(hb) == 1;
+			p2 = cdfn(mu_final);
+			p2_grad = pdfn(mu_final);
+		elseif rows(hb) == 2;
+			p2 = cdfBvn(mu_final[1],mu_final[2],omegacorr[1,2]);
+			p2_grad = cdfbvn_grad(mu_final[1],mu_final[2], omegacorr[1,2]);
+			p2_grad = p2_grad'; @Making it a row vector@
+		else;
+			{p2,p2_grad,sq} = pdfmvna(mu_final',omegacorr,seedn); //p2_grad is a row vector
+		endif;
+		
+		@Making ha_grad a ch by nvarm matrix@ @mu_final_grad is already nch by (nvarm+nvargam)@
+		if(rows(hb) == 1);
+			gg = (((1/p1) .* (p1_grad_mean[1:cols(ch)]' * (-ha_grad'))) + ((1/p2) .* (p2_grad[1:cols(nch)] * mu_final_grad)))~@gg is a 1 by (nvarm+nvardel+nvargam) vector@
+			(((1/p1).*(p1_grad_cov' * covj_grad_i')) //An 1 by ncov vector
+			+ (1/p2).*(p2_grad[1:cols(nch)]*mu_final_grad2')); //An 1 by ncov vector
+		elseif(rows(hb)>1);
+			gg = (((1/p1) .* (p1_grad_mean[1:cols(ch)]' * (-ha_grad'))) + ((1/p2) .* (p2_grad[1:cols(nch)] * mu_final_grad)))~@gg is a 1 by (nvarm+nvardel+nvargam) vector@
+			(((1/p1).*(p1_grad_cov' * covj_grad_i')) //An 1 by ncov vector
+			+ (1/p2).*(p2_grad[1:cols(nch)]*mu_final_grad2'+ p2_grad[cols(nch)+1:cols(p2_grad)]*shi_r_unq_i')); //1 by ncov vector
+		endif;
+		
+		clear ch, nch, ha, hb, covj_i, ha_grad, hb_grad, dummy, p1_grad_mean, p1_grad_cov, covj_inv, mu_i, omegacov, cond_omega,
+		omegacorr, mu_final, mu_grad_i, mu_final_grad, covj_grad_inv, covj_grad_nch, covj_grad_nch_ch, covj_grad_ch,
+		covj_iarray, covj_invarray, omegacov_grad,cond_omega_grad, omegacorr_grad, ha_array, mu_iarray, mu_grad2_i, mu_final_grad2,
+		shi_r_unq_i, covj_grad_i;
+	endif; @End of check how many alternatives have been consumed@
+
+	//print "cols(gg): " cols(gg) "(nvarm+nvargam+ncov): " (nvarm+nvargam+ncov);
+	gg_temp = gg_temp|gg; @gg is a 1 by (nvarm+nvardel+nvargam+ncov) vector, for individual j@
+	
+	//print "j: " j;
+	clear gg;
+	seedn = sq;
+
+ else;  // ELSE FOR THE PEOPLE WHO DID NOT PARTICIPATE IN ANY ACTIVITY IN THE BOTTOM NEST
+	 gg_temp = gg_temp|zeros(1,nvarm+nvargam+ncov);
+ endif;  // END OF CHECK; WHETHER ANY ALTERNATIVE IS CHOSEN IN THE BOTTOM NEST
+ j = j+1;
+endo; //End of loop for individual
+
+ post_obs = ones(nobs,1); 
+ gg_temp = gg_temp *~ post_obs; @gg_temp is a nobs by nvarm matrix@
+ 
+
+ /*gradient = gg_temp[.,1:nvarm] 
+			~ (jac_gradA+gg_temp[.,nvarm+1])
+			~(jac_gradG+gg_temp[.,nvarm+1+1:nvarm+1+nvargam])
+			~gg_temp[.,nvarm+1+nvargam+1:nvarm+1+nvargam+ncov]; @Jac_grad is a nobs by nvargam matrix@ */
+			
+ @alpha is no longer a parameter in the model, so account for that@			
+ gradient = gg_temp[.,1:nvarm] 
+			~(jac_gradG+gg_temp[.,nvarm+1:nvarm+nvargam])
+			~gg_temp[.,nvarm+nvargam+1:nvarm+nvargam+ncov];
+ 
+ 
+ Gradient_Store = gradient;
+ 
+// print "meanc(selif(gradient,sumc(b') .> 0)): " meanc(selif(gradient,sumc(b') .> 0));
+ retp(gradient); 
+endp;
+
+@CHANGING FOR ACCOUNTING ADDITIVE BOTTOM NEST PARAMETERS IN THE TOP NEST@
+proc lprnormTop(x,dta,nc, nvarm, nvardel, nvargam, ivm, ivd, ivg, flagchm, eqmatdel, eqmatgam,numout );
+ local e1,wt,xbase, xdel,xsigm,xsigmm,xgam,xsd,xcov,v2,w2,u2,j,v,Vf,w,u,a,f,b,m,mq,cqq,cq,sel,Jac,e,d, k;
+ local covb,covn,ident,min1,p3,seedn,sq,app1,hj,zj,covj,corrj,p1,p2,ch,nch,ha,hb,mu,mu_final,omegacov,omegacorr,z1,count, dummy;
+ local MBig, im, om, Vf1, errDiff, chNchId, chNchNo, ncDiff, iden_matrix, one_negative, mu_i, corrj_i, covj_i;
+ local nobs;
+ local vbnf, xbetabn, xbetabnf, ncbn, ivmbn, nvarmbn, bn, v2bn, vbn ;
+ local alpha;
+ 
+ e1 = rows(dta);  nobs = e1;  //print "nobs: " nobs; //e1 contains the number of observations
+ wt = dta[.,wtind]; //Get the weight in a column
+ xbase = x[1:nvarm]; //print "xbase: " xbase;//Baseline utility parameters 
+ xdel  = eqmatdel'*(-1000); //print "xdel: " xdel;//Converts the no. of alpha parameters to be estimated to the total no. of alternatives, nc
+ xgam  = eqmatgam'*x[nvarm+1:nvarm+nvargam]; //print "xgam: " xgam;//same as above
+ xcov  = upmat(xpnd(x[nvarm+nvargam+1:nvarm+nvargam+(nc*(nc+1)/2)])); //print "xcov: " xcov;//Get the cholesky factors - the upper triangular matrix
+ alpha = x[nvarm+nvargam+nc*(nc+1)/2+1:nvarm+nvargam+nc*(nc+1)/2+(nc-numout)];   // Alpha parameters specific for each nest
+ 
+ xbetabn = x[nvarm+nvargam+nc*(nc+1)/2+(nc-numout)+1:nvarm+nvargam+nc*(nc+1)/2+(nc-numout)+sumc(nvarmmb)];  // Bottom nest baseline utility parameters
+ 
+ vbnf = zeros(nobs,nc-numout); //This is the nobs by nc matrix that hold the final botto nest probability, there is no bottom nest in the first top nest
+ 
+ /* This loop is for creating the sum of the bottom nest utility */
+ @Run a loop to create@
+ for bn(1,(nc-numout),1);  // The loop run as many times as there are bottom nests, this nc is equal to nc_top
+	 ncbn = nc_bot[bn+numout]; // Number of alternatives in the bottom nest
+	 
+	// Take the appropriate beta and take ivm
+	 if (bn .== 1);
+		ivmbn = ivmmb[1:nvarmmb[bn]*nc_bot[bn+numout]];  //print "ivmbn: " ivmbn;
+		xbetabnf = xbetabn[1:nvarmmb[bn]];	//print "xbetabnf: " xbetabnf;
+	 else;
+	    ivmbn = ivmmb[sumc(nvarmmb[1:(bn-1)].*nc_bot[numout+1:(numout+bn-1)])+1:sumc(nvarmmb[1:bn].*nc_bot[numout+1:numout+bn])];	//print "ivmbn: " ivmbn;
+		xbetabnf = xbetabn[sumc(nvarmmb[1:(bn-1)])+1:sumc(nvarmmb[1:bn])];   //print "xbetabnf: " xbetabnf;
+	 endif;
+	
+	// Define nvarmbn
+	 nvarmbn = nvarmmb[bn];  //print "nvarmbn: " nvarmbn;
+	 v2bn = (ones(ncbn,1) .*. xbetabnf)*~(dta[.,ivmbn])'; 
+	 
+	 j = 1;
+	 vbn = {};
+	 do until j == ncbn+1;
+		vbn = vbn~(sumc(v2bn[(j-1)*nvarmbn+1:(j*nvarmbn),.])); //beta_hat*zee
+		j = j + 1;
+	endo;
+	// vbn is a nobs by ncbn matrix	
+	
+	//print "bn: " bn "meanc(vbn): " meanc(vbn)';
+	
+	 vbnf[.,bn] = sumc(vbn'); //Concatenating and summing up rowwise
+	 //print "bn: " bn "ncbn: " ncbn "xbetabnf: " xbetabnf' "ivmbn: " ivmbn "nvarbmn: " nvarmbn;
+	 clear ncbn, ivmbn, xbetabnf, nvarmbn, v2bn, vbn;
+ endfor;
+
+ @AT THE END OF CREATION OF vbnf, IT SHOULD BE A MATRIX OF SIZE NOBS BY (NC-NUMOUT)@
+ @NEXT STEP IS TO MULTIPLY THAT BY APPROPRIATE ALPHAS@
+ vbnf = (alpha *~ (vbnf'))';  @vbfn IS NOW A nobs by (nc-numout) matrix@
+
+
+//multiply the variables with the appropriate betas for all the alternatives
+ v2 = (ones(nc,1) .*. xbase)*~(dta[.,ivm])';
+ w2 = (ones(nc,1) .*. xdel)*~(dta[.,ivd])'; //For alpha
+ u2 = (ones(nc,1) .*. xgam)*~(dta[.,ivg])'; //For gamma
+
+//Sum the deterministic portion of the utility, alpha and gamma
+ j=1;
+ v = {};
+ w = {};
+ u = {};
+ do until j == nc+1;
+   v = v~(sumc(v2[(j-1)*nvarm+1:(j*nvarm),.]));			// beta*zeta deterministic
+   w = w~(sumc(w2[(j-1)*nvardel+1:(j*nvardel),.]));		// alpha
+   u = u~(sumc(u2[(j-1)*nvargam+1:(j*nvargam),.]));		// gamma
+   j = j+1;
+ endo;
+
+ clear v2,w2;
+
+
+ // Add the bottom nest utility with the top nest utility, vbnf will be equal to zero if nest != 0
+ v = v + (zeros(nobs,numout)~vbnf); // The first column of zero is for the top nest outside good
+  
+ a = exp(w);		
+ if _alp0to1;
+   a = 1/(1+exp(w)); 		// a is 1-alpha
+ endif;
+
+
+ f = exp(u);				// gamma
+ b = dta[.,flagchm] .> 0;	// 1 if chosen, 0 if not //A nobs x nc matrix
+ m = sumc(b');				// number of chosen alternatives  //an nobs x 1 column vector
+
+ //print "sumc(b): " sumc(b');	
+
+ // Identifying alternative mq
+ mq = b.* (seqa(1,1,nc))'; //Convert the 1's into the serial number of the alternatives
+ mq = substute(mq,b.==0,nc+1); //Give a number greater than the total number of alternatives to the unchosen alternatives
+ mq = minc(mq'); //Select the id of the first chosen alternative //mq is a nobs x 1 column vector
+ 
+ @Added to correct for the fact that, to correct for the fact that, mq is (nc+1) for ind who did not chose any alternatives in the bottom nest@
+ mq = (mq .* (sumc(b').> 0)) + ((sumc(b').== 0) .* 2);
+ 
+ Vf = zeros(e1,nc);
+ 
+ //All the matrices in this equation are nobs x nc, must require the use of dot operator
+ Vf[.,1:numout] = v[.,1:numout]-a[.,1:numout].*ln((dta[.,flagchm[1:numout]]+f[.,1:numout]))-ln(ones(e1,numout));	// deterministic component V //An nobs by nc matrix //Replaced price with ones(nobs,nc)
+ Vf[.,(1+numout):nc] = v[.,(1+numout):nc]-a[.,(1+numout):nc].*ln((dta[.,flagchm[(1+numout):nc]]+f[.,(1+numout):nc])./f[.,(1+numout):nc])-ln(ones(e1,(nc-numout)));
+ //Vf = v-a.*ln((dta[.,flagchm]+f)./f)-ln(dta[.,flagprcm]);
+
+ //Taking differences w/r to alternative mq
+ cqq = reshape(((seqa(1,1,nc).*.ones(1,nobs)))', nobs*nc, 1 ); //cqq is a column of the seq of alternative numbers repeated nobs times
+ cq = reshape(b, nobs*nc, 1 ); //Convert b into a column, where the seq is the participation indicator for 1st obs then for second observation and so on
+ sel = cqq.*(cqq .!= (mq.*.ones(nc,1)));
+ cq = reshape(selif(cq, cqq .== sel), nobs, nc-1); //cq is b arranged an nobs x (nc- 1) matrix//alternatives are 1 0 with 1 for selected and 0 for non-selected
+ 
+ 
+ //Jacobian computation - not dividing by the price of mq, 
+ //Correct if no price variation - need to correct if there is price variation
+ Jac = (a.*b)./((dta[.,flagchm]+f));
+ Jac = Jac./(ones(nobs,nc)); //Replaced price with ones(nobs,nc) 
+ Jac = substute(Jac,b.==0,1); //
+ e = (1/Jac).*b;  //nobs x nc matrix
+ d = sumc((e'));//nobs x 1, the summation portion of the Jacobian
+ Jac = (prodc((Jac'))).*d; //An nobs by 1 matrix
+  
+ covn = xcov'*xcov; //print covn;
+
+ //Create the Big M matrix
+ ncDiff = (nc-1); @How many rows in each chunk of M@
+ MBig = zeros(ncDiff*nc,nc);
+ iden_matrix = eye(nc-1);
+ one_negative = -ones(nc-1,1);
+   
+  for im(1,nc,1);
+	if(im eq 1);
+		MBig[((im-1)*ncDiff+1):im*ncDiff,.] = one_negative ~ iden_matrix; @First column is filled up by -1, the rest of the matrix is filled up by (nc-1) identity matrix@
+	elseif(im eq nc);
+		MBig[((im-1)*ncDiff+1):im*ncDiff,.] = iden_matrix ~ one_negative;	@Last column is filled up by -1, the rest of the matrix is filled up by (nc-1) identity matrix@
+	else;
+		MBig[((im-1)*ncDiff+1):im*ncDiff,.] = iden_matrix[.,1:im-1] ~ one_negative ~ iden_matrix[.,im:nc-1]; @Choice column filled up by -1@
+	endif;
+  endfor;
+ @END OF CREATING MBig@
+ 
+ 
+ @NEXT CREATE hj, covj, corrj, om - ALL OF THESE WILL VARY BY WHICH ALTERNATIVE IS CHOSEN@
+ hj = zeros(nobs,(nc-1)); @This will hold the differenced mean@
+ mu = zeros(nobs,(nc-1)); @This will hold the differenced mean divided by the stadard deviation@
+ covj = zeros((nc-1)*nc,(nc-1)); @Variance covariance matrix of the differenced error@
+ corrj = zeros((nc-1)*nc,(nc-1)); @Error correlation matrix of the differenced error@
+ om = zeros(nc,(nc-1)); @To hold the diagonal elements of the error difference matrix@
+ 
+ @mq is a column vector that holds the first chosen alternative for an individual@
+ @m is a column vector that contains the number of chosen alternatives for an individual@
+ for i(1,nc,1);
+	@Get the M depending on the choice of the alternative@
+	app1 = MBig[(i-1)*ncDiff+1:i*ncDiff,.]; @Get the appropriate M depending on which alternative has been chosen@
+	Vf1 = (app1*Vf')'; @Utility is a nobs by nc matrix@ @Direct product will have nobs rows and nc columns@
+	hj = hj + (Vf1 *~ (mq .== i)); @This is an nobs by (nc-1), appropriately created depending on which alternative has been chosen@
+	errDiff = app1*covn*app1'; @The error difference matrix@
+	covj[(i-1)*ncDiff+1:i*ncDiff,.] = errDiff;   
+	om[i,.] = diag(errDiff)'; @After taking square root making it a row vector@ @sqrt has not bee taken@
+	mu = mu + ((hj *~ (mq .== i)) ./sqrt(om[i,.])); @Mean divided by the square root of variance, considering the first chosen alternative@
+	corrj[(i-1)*ncDiff+1:i*ncDiff,.] = diagrv(corrvc(errDiff),ones(nc-1,1)); @corrj is the correlation matrix for error variance covariance matrix@
+	clear Vf1, errDiff;
+ endfor;
+ @After end of this loop, hj is a nobs by (nc-1) matrix, and covj is a (nc-1)*nc by (nc-1) matrix, @
+ @Now in the rest of the likelihood code all that you need to do is to pick the right covj, corrj, hj and mu@ 
+  
+ p3 = ones(nobs,1);
+ seedn = seednext; //A different seed is used for each individual, across iterations the seed remain the same
+ sq = seedn;
+ 
+
+ for j(1,nobs,1);
+   if (sumc(b[j,.]') .> 0);	
+	// Case 1: only corner solutions - only one alternative is chosen - only joint normal cdf needs to be calculated
+	if m[j] == 1;
+		p1 = 1;	
+		mu_i = -mu[j,.]; @This would be a (nc-1) vector, a row vector@
+		corrj_i = corrj[(mq[j]-1)*ncDiff+1:mq[j]*ncDiff,.]; @This would be an (nc-1) by (nc-1) matrix@
+	    if (nc-1)==1; //Takes care of two (total) alternatives case
+			p2 = cdfn(mu_i);
+		elseif (nc-1)<3; //Takes care of three (total) alternatives case
+			p2 = cdfbvn(mu_i[1],mu_i[2],corrj_i[1,2]);
+		else; // Takes care of more than three (total) alternatives case
+			{p2,sq} = cdfMvna(mu_i,corrj_i, seedn);  @mu_i need to be a row vector@
+		endif;
+		
+		clear mu_i, corrj_i;	
+		
+	// Case 2: only interior soultions - all the available alternatives are chosen - only a joint normal pdf needs to be calculated
+    elseif m[j] == nc;
+	    mu_i = hj[j,.]'; @An (nc-1) vector@ @This needs to be a column vector for passing it to pdfmvn@
+		covj_i = covj[(mq[j]-1)*ncDiff+1:mq[j]*ncDiff,.]; @An (nc-1) by (nc-1) matrix@
+	    dummy =	zeros(rows(mu_i),1);
+		p1 = Jac[j]*pdfmvn(dummy, mu_i, covj_i); // pdfmvn is a function defined by the user
+		p2 = 1;
+		clear mu_i, covj_i;
+		
+	// Case 3: corner and interior solutions - both the joint normal pdf and joint normal cdf need to be calculated
+	else; @Where number of chosen alternative is greater than 1 and less than nc@
+		ch = seqa(1,1,(nc-1))' .* cq[j,.];   
+		ch = selif(ch',(ch' .!=0))';
+		nch = seqa(1,1,(nc-1))' .* (cq[j,.].==0);
+		nch = selif(nch',(nch' .!=0))';
+		@Finally ch and nch are row vectors@
+		
+			
+		@ha and hb needs to be a column vector for passing it to pdfmvn@
+		ha = hj[j,ch]'; //Contains the deterministic portion of the utility for the chosen alternatives without mq in a column vector 
+		hb = hj[j,nch]'; //Conatins the deterministic portion of the utility for the non-chosen alternatives in a column vector
+		covj_i = covj[(mq[j]-1)*ncDiff+1:mq[j]*ncDiff,.]; @Getting the appropriate (nc-1) by (nc-1) matrix@
+		
+		dummy = zeros(rows(ha),1);
+		p1 = Jac[j]*pdfmvn(dummy, ha, covj_i[ch,ch]);//The joint normal pdf of the chosen alternatives without mq
+		
+		//Calculation of the conditional mean and the conditional variance
+		mu_i = hb + covj_i[nch,ch]*inv(covj_i[ch,ch])*(-ha); @An nch by 1 vector@
+		omegacov = covj_i[nch,nch] - covj_i[nch,ch]*inv(covj_i[ch,ch])*covj_i[ch,nch]; //conditional covariance //An nch by nch matrix
+		omegacorr = corrvc(omegacov);
+		omegacorr = diagrv(omegacorr, ones(rows(hb),1)); //calculation of the correlation // GAUSS function corrvc() should work as well
+		mu_final = (-mu_i)./sqrt(diag(omegacov));
+		if rows(hb) == 1;
+			p2 = cdfn(mu_final);
+		elseif rows(hb)<3;
+			p2 = cdfBvn(mu_final[1],mu_final[2],omegacorr[1,2]);
+		else;
+			{p2,sq} = cdfmvna(mu_final',omegacorr,seedn);
+		endif;
+	endif; @End of check how may alternatives have been consumed@
+	p3[j] = p1*p2; 
+	seedn = sq;
+ else;
+	p3[j] = 1; 
+ endif; //End of check whether budget is greater than 0
+endfor; @End of looping over individual@
+
+ w1=zeros(e1,1);
+ if p3 > w1;
+     z1 = ln(p3);
+	 post_obs = ones(nobs,1);
+ else;
+     z1=ln(p3-((p3.<=w1).*(p3-0.0001)));
+	 post_obs = ((p3.<=w1).*0)+(p3.>w1);
+ endif;
+
+//print "meanc(selif(z1,(sumc(b').>0))): " meanc(selif(z1,(sumc(b').>0)));
+
+retp(wt.*z1);
+ //retp(0);
+endp;
+
+
+
+proc lgdnormTop(x,dta, nc, nvarm, nvardel, nvargam, ivm, ivd, ivg, flagchm, eqmatdel, eqmatgam,numout,_new_max_active );
+ local e1,wt,xbase, xdel,xsigmm,xgam,xsd,xcov,v2,w2,u2,j,k, v,Vf, w,u,a,f,b,m,mq,cqq,cq,sel,Jac,e,d, dummy;
+ local covb,covn,ident,min1,p3,seedn,sq,app1,hj,zj,covj,corrj,p1,p2,ch,nch,ha,hb,mu,mu_final, omegacov,omegacorr,z1,count;
+ local beta_score, gamma_score, alpha_score, cov_score, iBeta, iGamma, iAlpha, iCov, gg, gg_temp, dummy_grad;
+ local cov_grad, cov_gradff, xbase_grad, xdel_grad, xgam_grad, v2_grad, w2_grad, u2_grad, v_grad, w_grad, u_grad, a_grad, f_grad, shi_r_unq, ishi;
+ local hj_grad, covj_grad, corrj_grad, ha_grad, hb_grad, mu_grad, mu_final_grad, omegacov_grad, omegacorr_grad, omega, omega_grad, cond_omega, cond_omega_grad;
+ local p1_grad, p1_grad_mean, p1_grad_cov, p2_grad, p1_gg, p2_gg;
+ local jac_grad1, jac_grad2, jac_grad2_top, jac_grad2_bottom, jac_grad, gradient;
+ local ncDiff, MBig, iden_matrix, one_negative, mu_i, covj_i, corrj_i, hj_i, mu_grad_i, hj_grad_i, covj_inv, om, Vf1, errDiff;
+ local hj_grad1, v_gradG, mq_big, Vf_grad, cov_gradf, cov_gradfff, omegaArr, covjA1, covjA2, omegai, corrj_grad1, omega_grad1;
+ local covjGradVech, mu_grad2, mu_grad2_i, shi_r_unq_i, covj_grad_i, covj_grad_inv, cov_grad_i2;
+ local covj_grad_ch, covj_grad_nch, covj_grad_nch_ch, covj_iarray, covj_invarray, mu_final_grad2, omega_grad_n, mu_iarray, ha_array;
+ local covj_grad_array, covj_grad_ch_nch, v_gradA, wBig, jac_gradG, jac_gradA, ncov;
+ local nobs;   // These are local copies of nobs and local copies of _max_active; they do not interfere with global copies of nobs and global copies of _max_active
+ local jac_grad1_denom;
+ 
+ local vbnf, xbetabn, xbetabnf, ncbn, ivmbn, nvarmbn, bn, v2bn, vbn ;
+ local beta_score_bn, xbase_grad_bn, v2_grad_bn, v_grad_bn, v_grad_bn_temp, v_grad_bnf, dummy_nc ;
+ local hj_grad_bn1, hj_grad_bn, mu_grad_bn, mu_grad_bn_i, hj_grad_bn_i, ha_grad_bn, hb_grad_bn, mu_final_grad_bn;
+ local  alpha, alpha_grad, alpha_grad1, alpha_grad2, alpha_grad1_i, alpha_grad2_i, alpha_grad21, alpha_grad22, alpha_grad2_iFinal;
+ 
+ e1 = rows(dta);  nobs = e1; //e1 contains the number of observations
+ wt = dta[.,wtind]; //Get the weight in a column
+ xbase = x[1:nvarm]; //Baseline coefficients
+ xdel  = eqmatdel'*(-1000); //print "xdel: " xdel;//Converts the no. of alpha parameters to be estimated to the total no. of alternatives, nc
+ xgam  = eqmatgam'*x[nvarm+1:nvarm+nvargam]; //print "xgam: " xgam;//same as above
+ xcov  = upmat(xpnd(x[nvarm+nvargam+1:nvarm+nvargam+(nc*(nc+1)/2)])); //print "xcov: " xcov;//Get the cholesky factors - the upper triangular matrix
+ @xcov is an upper triangular matrix@
+ alpha = x[nvarm+nvargam+(nc*(nc+1)/2)+1:nvarm+nvargam+(nc*(nc+1)/2)+(nc-numout)];
+ 
+/***************This portion is exclusive for top nest****************************************/
+
+ xbetabn = x[nvarm+nvargam+nc*(nc+1)/2+(nc-numout)+1:nvarm+nvargam+nc*(nc+1)/2+(nc-numout)+sumc(nvarmmb)];  // Bottom nest baseline utility parameters
+ 
+ vbnf = zeros(nobs,nc-numout); //This is the nobs by nc matrix that hold the final botto nest probability, there is no bottom nest in the first top nest
+ v_grad_bnf = {};  // This should ultimately be a nobs by sumc(nvarmb) matrix
+ 
+ /* This loop is for creating the sum of the bottom nest utility */
+ @Run a loop to create@
+ for bn(1,(nc-numout),1);  // The loop run as many times as there are bottom nests, this nc is equal to nc_top
+	 ncbn = nc_bot[bn+numout]; // Number of alternatives in the bottom nest
+	 
+	// Take the appropriate beta and take ivm
+	 if (bn .== 1);
+		ivmbn = ivmmb[1:nvarmmb[bn]*nc_bot[bn+numout]];  //print "ivmbn: " ivmbn;
+		xbetabnf = xbetabn[1:nvarmmb[bn]];	//print "xbetabnf: " xbetabnf;
+	 else;
+	    ivmbn = ivmmb[sumc(nvarmmb[1:(bn-1)].*nc_bot[numout+1:(numout+bn-1)])+1:sumc(nvarmmb[1:bn].*nc_bot[numout+1:numout+bn])];	//print "ivmbn: " ivmbn;
+		xbetabnf = xbetabn[sumc(nvarmmb[1:(bn-1)])+1:sumc(nvarmmb[1:bn])];   //print "xbetabnf: " xbetabnf;
+	 endif;
+	
+	// Define nvarmbn
+	 nvarmbn = nvarmmb[bn];  //print "nvarmbn: " nvarmbn;
+	 v2bn = (ones(ncbn,1) .*. xbetabnf)*~(dta[.,ivmbn])'; 
+	 
+	 j = 1;
+	 vbn = {};
+	 do until j == ncbn+1;
+		vbn = vbn~(sumc(v2bn[(j-1)*nvarmbn+1:(j*nvarmbn),.])); //beta_hat*zee
+		j = j + 1;
+	endo;
+	// vbn is a nobs by ncbn matrix	
+	
+	//print "bn: " bn "meanc(vbn): " meanc(vbn)';
+	
+	 vbnf[.,bn] = sumc(vbn'); //Concatenating and summing up rowwise
+	 
+	 /*This portion is for gradient calculation*/
+	 beta_score_bn = eye(nvarmbn) ; @Assuming all the parameters will be active@
+	 xbase_grad_bn = ones(ncbn,1) .*. beta_score_bn; @beta_score_bn repeated nc times column wise@
+	 v2_grad_bn = (dta[.,ivmbn])' *~ xbase_grad_bn;  //This matrix will have nvarm*nc rows, each nvarm chunk for one beta param, nvarm*nobs columns, each nvarm chunk for each individual
+	 
+	 j = 1;
+	 v_grad_bn = {};
+	 
+	 do until j == ncbn+1;
+		v_grad_bn = v_grad_bn~(sumc(v2_grad_bn[(j-1)*nvarmbn+1:(j*nvarmbn),.]));			// beta*zeta deterministic
+		j = j+1;
+	 endo;
+	 @v_grad_bn has nvarmbn*nobs rows and ncbn columns@
+	 
+	 v_grad_bnf = v_grad_bnf ~ ( alpha[bn] .* reshape(sumc(v_grad_bn'),nobs,nvarmbn)); // summing across ncbn columns, only required in the presence of generic parameter
+	 
+	 clear ncbn, ivmbn, xbetabnf, nvarmbn, v2bn, vbn;
+	 clear beta_score_bn, xbase_grad_bn, v2_grad_bn, v_grad_bn, v_grad_bn_temp;
+ endfor;
+
+@At the end of the loop, v_grad_bnf should be a nobs by sumc(nvarmb) matrix@
+
+@THIS IS TO CREATE GRADIENT OF ALPHA@
+alpha_grad = vbnf;  @This is the vbnf without multiplying by alpha@
+alpha_grad = reshape(alpha_grad,(nc-numout)*nobs,1);  @Now this is a nobs*(nc-numout) by 1 vector@ @Each (nc-numout chunk has been repeated nobs times)@
+alpha_grad = alpha_grad *~ (ones(nobs,1) .*. eye((nc-numout))); @Finally this is nobs by (nc-numout) matrix@
+//alpha_grad = zeros((nobs*(nc-numout)),1)~alpha_grad;
+@End of creation of alpha_grad@
+
+
+@Next step is to convert v_grad_bnf into a sumc(nvarmb)*nobs by nc matrix@
+dummy_nc = zeros(sumc(nvarmmb),(nc-numout));  // Since outgd does not have any bottom nest, so numout is deducted
+
+
+for j(1,nc-numout,1);
+	if (j .== 1);
+		dummy_nc[1:nvarmmb[j],j] = ones(nvarmmb[j],1);
+	else;
+		dummy_nc[sumc(nvarmmb[1:(j-1)])+1:sumc(nvarmmb[1:j]),j] = ones(nvarmmb[j],1);
+	endif;
+endfor;	
+
+@now repeat the whole dummy_nc nobs times row wise@
+dummy_nc = ones(nobs,1) .*. dummy_nc;  //print "rows check dummy_nc: " sumc(nvarmb)*nobs rows(dummy_nc);
+
+//print "check dummy_nc: " (nvarmb~sumc(dummy_nc));  // Check that it has been produced correctly
+
+v_grad_bnf = reshape(v_grad_bnf,nobs*sumc(nvarmmb),1) *~ dummy_nc;  // Converting it into a sumc(nvarmb)*nobs by nc matrix
+
+v_grad_bnf = zeros(sumc(nvarmmb)*nobs,1) ~ v_grad_bnf;  // v_grad_bnf is a sumc(nvarmb)*nobs by nc matrix
+
+//print "v_grad_bnf[1:sumc(nvarmb),.]: " v_grad_bnf[1:sumc(nvarmb),.]; // Seem to have been converted fine
+
+clear dummy_nc; 
+
+/***********End of exclusive portion for the top nest*****************************************************/
+ 
+ 
+ 
+//covariance matrix errors//xcov contains the upper triangle of the Cholesky factor
+ ncov = nc*(nc+1)/2;
+ covn = xcov'*xcov;
+ 
+ //multiply the variables with the appropriate betas for all the alternatives
+ v2 = (ones(nc,1) .*. xbase)*~(dta[.,ivm])';
+ w2 = (ones(nc,1) .*. xdel)*~(dta[.,ivd])'; //For alpha
+ u2 = (ones(nc,1) .*. xgam)*~(dta[.,ivg])'; //For gamma
+ 
+//Sum the deterministic portion of the utility, alpha and gamma
+ j=1;
+ v = {};
+ w = {};
+ u = {};
+ do until j == nc+1;
+   v = v~(sumc(v2[(j-1)*nvarm+1:(j*nvarm),.]));			// beta*zeta deterministic
+   w = w~(sumc(w2[(j-1)*nvardel+1:(j*nvardel),.]));		// alpha
+   u = u~(sumc(u2[(j-1)*nvargam+1:(j*nvargam),.]));		// gamma
+   j = j+1;
+ endo;
+ //At the end of the loop, v, w and u are nobs x nc matrices
+
+ clear v2,w2;
+ 
+ @MULTIPLY VBNF BY ALPHA@
+ vbnf = (alpha *~ (vbnf'))';  @vbnf is a nobs by (nc-numout) matrix@
+ 
+ // Add the bottom nest utility with the top nest utility, vbnf will be equal to zero if nest != 0
+ v = v + (zeros(nobs,numout)~vbnf); // The first column of zero is for the top nest outside good
+ 
+ a = exp(w);		
+ if _alp0to1;
+   a = 1/(1+exp(w)); 		// a is 1-alpha
+ endif;
+ 
+ f = exp(u);				// gamma
+ b = dta[.,flagchm] .> 0;	// 1 if chosen, 0 if not //A nobs x nc matrix
+ m = sumc(b');				// number of chosen alternatives  //an nobs x 1 column vector
+ 
+ // Identifying alternative mq
+ mq = b.* (seqa(1,1,nc))'; //Convert the 1's into the serial number of the alternatives
+ mq = substute(mq,b.==0,nc+1); //Give a number greater than the total number of alternatives to the unchosen alternatives
+ mq = minc(mq'); //Select the id of the first chosen alternative //mq is a nobs x 1 column vector
+ 
+ /*@Added to correct for the fact that, to correct for the fact that, mq is (nc+1) for ind who did not chose any alternatives in the bottom nest@
+ mq = (mq .* (sumc(b').> 0)) + ((sumc(b').== 0) .* 2);*/
+ 
+ Vf = zeros(e1,nc);
+ //All the matrices in this equation are nobs x nc, must require the use of dot operator
+ Vf[.,1:numout] = v[.,1:numout]-a[.,1:numout].*ln((dta[.,flagchm[1:numout]]+f[.,1:numout]))-ln(ones(e1,numout));	// deterministic component V //An nobs by nc matrix
+ Vf[.,numout+1:nc] = v[.,numout+1:nc]-a[.,numout+1:nc].*ln((dta[.,flagchm[numout+1:nc]]+f[.,numout+1:nc])./f[.,numout+1:nc])-ln(ones(e1,(nc-numout)));	// deterministic component V //An nobs by nc matrix
+ //Vf = v-a.*ln((dta[.,flagchm]+f)./f)-ln(dta[.,flagprcm]);
+ 
+ // Taking differences w/r to alternative mq
+ cqq = reshape(((seqa(1,1,nc).*.ones(1,nobs)))', nobs*nc, 1 ); //cqq is a column of the seq of alternative numbers repeated nobs times
+ cq = reshape(b, nobs*nc, 1 ); //Convert b into a column, where the seq is the participation indicator for 1st obs then for second observation and so on
+ sel = cqq.*(cqq .!= (mq.*.ones(nc,1)));
+ cq = reshape(selif(cq, cqq .== sel), nobs, nc-1); //cq is b arranged an nobs x (nc- 1) matrix //alternatives are 1 0 with 1 for selected and 0 for non-selected
+ 
+ // Jacobian computation - not dividing by the price of mq, 
+ //Correct if no price variation - need to correct if there is price variation
+ Jac = (a.*b)./((dta[.,flagchm]+f));
+ Jac = Jac./(ones(e1,nc)); 
+ Jac = substute(Jac,b.==0,1); //
+ e = (1/Jac).*b;  //nobs x nc matrix
+ d = sumc((e'));//nobs x 1, the summation portion of the Jacobian
+ Jac = (prodc((Jac'))).*d; //An nobs by 1 matrix
+  
+ //Create the Big M matrix //Only needs to be created nc times instead of nobs times
+ ncDiff = (nc-1); @How many rows in each chunk of M@
+ MBig = zeros(ncDiff*nc,nc);
+ iden_matrix = eye(nc-1);
+ one_negative = -ones(nc-1,1);
+   
+  for im(1,nc,1);
+	if(im eq 1);
+		MBig[((im-1)*ncDiff+1):im*ncDiff,.] = one_negative ~ iden_matrix; @First column is filled up by -1, the rest of the matrix is filled up by (nc-1) identity matrix@
+	elseif(im eq nc);
+		MBig[((im-1)*ncDiff+1):im*ncDiff,.] = iden_matrix ~ one_negative;	@Last column is filled up by -1, the rest of the matrix is filled up by (nc-1) identity matrix@
+	else;
+		MBig[((im-1)*ncDiff+1):im*ncDiff,.] = iden_matrix[.,1:im-1] ~ one_negative ~ iden_matrix[.,im:nc-1]; @Choice column filled up by -1@
+	endif;
+  endfor;
+ @END OF CREATING MBig@
+ 
+ @NEXT CREATE hj, covj, corrj, om - ALL OF THESE WILL VARY BY WHICH ALTERNATIVE IS CHOSEN@
+ hj = zeros(nobs,(nc-1)); @This will hold the differenced mean@
+ mu = zeros(nobs,(nc-1)); @This will hold the differenced mean divided by the stadard deviation@
+ covj = zeros((nc-1)*nc,(nc-1)); @Variance covariance matrix of the differenced error@
+ corrj = zeros((nc-1)*nc,(nc-1)); @Error correlation matrix of the differenced error@
+ om = zeros(nc,(nc-1)); @To hold the diagonal elements of the error difference matrix@
+ 
+ @mq is a column vector that holds the first chosen alternative for an individual@
+ @m is a column vector that contains the number of chosen alternatives for an individual@
+ for i(1,nc,1);
+	@Get the M depending on the choice of the alternative@
+	app1 = MBig[(i-1)*ncDiff+1:i*ncDiff,.]; @Get the appropriate M depending on which alternative has been chosen@
+	Vf1 = (app1*Vf')'; @Utility is a nobs by nc matrix@ @Direct product will have nobs rows and nc columns@
+	hj = hj + (Vf1 *~ (mq .== i)); @This is an nobs by (nc-1), appropriately created depending on which alternative has been chosen@
+	errDiff = app1*covn*app1'; @The error difference matrix@
+	covj[(i-1)*ncDiff+1:i*ncDiff,.] = errDiff;   
+	om[i,.] = diag(errDiff)'; @After taking square root making it a row vector@ @sqrt has not bee taken@
+	mu = mu + ((hj *~ (mq .== i)) ./sqrt(om[i,.])); @Mean divided by the square root of variance, considering the first chosen alternative@
+	corrj[(i-1)*ncDiff+1:i*ncDiff,.] = diagrv(corrvc(errDiff),ones(nc-1,1)); @corrj is the correlation matrix for error variance covariance matrix@
+	clear Vf1, errDiff;
+ endfor;
+ @After end of this loop, hj is a nobs by (nc-1) matrix, and covj is a (nc-1)*nc by (nc-1) matrix, @
+ @Now in the rest of the likelihood code all that you need to do is to pick the right covj, corrj, hj and mu@  
+ 
+ //GRADIENT WITH RESPECT TO BETA, ONLY AFFECTS THE DETERMINISTIC PORTION OF THE UTILITY
+  
+ @In each column, one element is one, the rest of them are zero@ @Multiplying by _max_active, takes care of the active parameter@
+ beta_score = eye(nvarm) *~ _new_max_active[1:nvarm];
+ xbase_grad = ones(nc,1) .*. beta_score; @Next repeat the full chunk of beta_score nc times@ 
+ v2_grad = (dta[.,ivm])' *~ xbase_grad; //This matrix will have nvarm*nc rows, each nvarm chunk for one beta param, nvarm*nobs columns, each nvarm chunk for each individual
+		 
+ //GRADIENT WITH RESPECT TO ALPHA
+ /*alpha_score = eye(rows(eqmatdel)) *~ _max_active[nvarm+1:nvarm+rows(eqmatdel)];
+ alpha_score = eqmatdel' * alpha_score; @Converting it from number of parameters to number of alternatives@
+ xdel_grad =  ones(nc,1) .*. alpha_score; @Repeating each block of alpha_score nc times@
+ w2_grad = dta[.,ivd]' *~ xdel_grad; @Will have nvardel*nc rows and nvardel*nobs columns@*/
+ 
+ 
+ //GRADIENT WITH RESPECT TO GAMMA, ONLY AFFECTS THE DETERMINISTIC PORTION OF THE UTILITY AS WELL AS THE JACOBIAN
+ 
+ gamma_score = eye(rows(eqmatgam)) *~ _new_max_active[nvarm+1:nvarm+rows(eqmatgam)]; @Each column corresponds to the derivative with respect to one gamma@ @Also multiply by _max_active to make the ones zero that are not active@
+ gamma_score = eqmatgam'*gamma_score; @Converting it from number of parameters to number of alternatives@ @In case eqmatgam is eye there is no effect@
+ xgam_grad = ones(nc,1) .*. gamma_score; @Repeating the block of gamma score nc times@
+ u2_grad = dta[.,ivg]' *~ xgam_grad; @u2_grad will have nvargam*nc rows and nvargam*nobs columns@
+ 
+ /**************************************************************************************************************************/
+
+ j = 1;
+ v_grad = {};	
+ u_grad = {};
+ w_grad = {};
+ do until j == nc+1;
+	v_grad = v_grad~(sumc(v2_grad[(j-1)*nvarm+1:(j*nvarm),.]));			// beta*zeta deterministic
+	u_grad = u_grad~(sumc(u2_grad[(j-1)*nvargam+1:(j*nvargam),.]));
+	//w_grad = w_grad~(sumc(w2_grad[(j-1)*nvardel+1:(j*nvardel),.]));
+	j = j+1;
+endo; 
+//v_grad is a (nvarm*nobs) rows, each chunk of nvarm rows for one nvarm parameters and nc columns
+//u_grad is a (nvargam*nobs) rows, each chunk of nvargam rows for one gamma parameter and nc columns 
+//w_grad is a (nvardel*nobs) rows, each chunk of nvardel rows for one alpha parameter and nc columns 
+ 
+  /*wBig = exp(w) .*. ones(1,1); @Repeating w for each individual nvardel times@ @An nvardel*nobs by nc matrix@
+  a_grad = wBig.*w_grad; //An (nvardel*nobs) x nc matrix	//The Kronecker product will repeat each row nvardel times	
+  if _alp0to1;
+	a_grad = -(wBig.*(w_grad))./(1+wBig)^2; 		// a is 1-alpha
+  endif;*/
+ 
+  @This is the gradient of the deterministic portion of the utility with respect to gamma parameter@
+  v_gradG = (((dta[.,flagchm].*a).*.ones(nvargam,1)).*u_grad)./((dta[.,flagchm]+f).*.ones(nvargam,1)); @v_gradG i s a nvargam*nobs by nc matrix@
+  //v_gradA = -a_grad .* ((ln((dta[.,flagchm]+f)./f)) .*. ones(1,1));
+  
+  /*v_gradA = zeros(e1,nc);
+  v_gradA[.,1:numout] = -a_grad[.,1:numout] .* ((ln((dta[.,flagchm[1:numout]]+f[.,1:numout]))) .*. ones(1,1)); @An nvardel*nobs by nc matrix, each block of nvardel is for one alpha parameter@
+  v_gradA[.,numout+1:nc] = -a_grad[.,numout+1:nc] .* ((ln((dta[.,flagchm[numout+1:nc]]+f[.,numout+1:nc])./f[.,numout+1:nc])) .*. ones(1,1)); @An nvardel*nobs by nc matrix, each block of nvardel is for one alpha parameter@	
+ */
+ 
+  //CALCULATION OF GRADIENT OF THE JACOBIAN
+  //WITH RESPECT TO GAMMA PARAMETERS
+  f_grad = (f .*. ones(nvargam,1)).*u_grad; //An (nvargam*nobs) x nc matrix @This is the gradient of u wrt gamma parameters@
+  
+  jac_grad1_denom = substute((dta[.,flagchm]+f),(dta[.,flagchm]+f).==0,1);  
+  //jac_grad1 = sumc(((-f_grad./((dta[.,flagchm]+f).*.ones(nvargam,1))).*(b.*.ones(nvargam,1)))'); //An (nvargam*nobs) x 1 matrix
+  jac_grad1 = sumc(((-f_grad./(jac_grad1_denom.*.ones(nvargam,1))).*(b.*.ones(nvargam,1)))'); //An (nvargam*nobs) x 1 matrix
+  jac_grad2_top = sumc(((f_grad./(a.*.ones(nvargam,1))).*(b.*.ones(nvargam,1)))'); //(nvargam*nobs) x 1 matrix
+  
+  //jac_grad2_bottom = (sumc((((dta[.,flagchm]+f)./a).*b)')).*.ones(nvargam,1); //(nvargam*nobs) x 1 matrix
+
+  @Making some changes here@
+  jac_grad2_bottom = (sumc((((dta[.,flagchm]+f)./a).*b)'));  
+  jac_grad2_bottom = substute(jac_grad2_bottom,jac_grad2_bottom.==0,1);  
+  jac_grad2_bottom = jac_grad2_bottom .*. ones(nvargam,1);  //(nvargam*nobs) x 1 matrix
+  @End of making changes@
+  
+  jac_grad2 = jac_grad2_top ./ jac_grad2_bottom; //(nvargam*nobs) x 1 matrix
+  jac_gradG = jac_grad1 + jac_grad2; //(nvargam*nobs) x 1 matrix
+  jac_gradG = reshape(jac_gradG, nobs, nvargam); @Making it a nobs by nvargam matrix@	
+  @jac_grad holds the gradient of the ln of the jacobian with respect to u, which is the parameter underlying the gamma parameter@
+  clear jac_grad1, jac_grad2_top, jac_grad2_bottom, jac_grad2;
+  
+  //WITH RESPECT TO ALPHA PARAMETERS
+ /* if (_alp0to1 == 0);
+		jac_grad1 = sumc((w_grad.*(b .*. ones(1,1)))'); //An 1*nobs x 1 matrix //Each chunk of 1 is for one alpha parameter
+		jac_grad2_top = sumc((((((dta[.,flagchm]+f) .*. ones(1,1)).*(-w_grad))./wBig).*(b .*. (ones(1,1))))'); //1*nobs x 1 matrix each chunk of nvardel is for one alpha parameter
+		jac_grad2_bottom = sumc(((((dta[.,flagchm]+f) .*. ones(1,1))./wBig).*(b .*. (ones(1,1))))'); //1*nobs x 1 matrix, each chunk of nvardel is for one alpha parameter
+		jac_grad2 = jac_grad2_top ./ jac_grad2_bottom; //1*nobs x 1 matrix //Each chunk is for one 1 parameter
+		jac_gradA = jac_grad1 + jac_grad2; //1*nobs x 1 matrix
+  elseif (_alp0to1 == 1);
+		jac_grad1 = sumc(((((-exp(w)./(1+exp(w))) .* b) .*. ones(1,1)).*w_grad)'); //An 1*nobs x 1 matrix
+		jac_grad2_top = sumc(((((dta[.,flagchm]+f).*b) .*. ones(1,1)).*w_grad.*wBig)'); //1*nobs x 1 matrix
+		jac_grad2_bottom = sumc(((((dta[.,flagchm]+f).*b).*.ones(1,1)).*(1+wBig))'); //1*nobs x 1 matrix
+		jac_grad2 = jac_grad2_top ./ jac_grad2_bottom;//nobs x 1 vector
+		jac_gradA = jac_grad1 + jac_grad2; //1*nobs x 1 vector
+		jac_gradA = reshape(jac_gradA, nobs, 1); @Making it a nobs by 1 matrix@
+ endif;
+ clear jac_grad1, jac_grad2_top, jac_grad2_bottom, jac_grad2;
+ */
+ 
+//GRADIENT WITH RESPECT TO CHOLESKY
+ cov_score = eye(ncov) *~ _new_max_active[nvarm+rows(eqmatgam)+1:nvarm+rows(eqmatgam)+ncov]; @@
+ 
+ @Create cov_grad array@ @To hold the variance covariance matrix of error wrt ncov parameters@
+ cov_gradf = arrayinit(ncov|nc|nc,0); @Initialize all the array elements with zero@
+ for i(1,ncov,1); @COULD NOT FIND ANY OTHER WAY TO CREATE THE LAMDAD MATRIX FOR THE TIME BEING, WITHOUT LOOPING THROUGH THE NCHOLERR PARAMETER VECTOR@  
+	 if(_new_max_active[nvarm+rows(eqmatgam)+i] .== 0); @That is if the parameter is  inactive@
+	 else; @If the ncov parameter is active@
+	 cov_grad = upmat(xpnd(cov_score[.,i])); @Making a upper triangular matrix@
+	 cov_grad = cov_grad'*xcov + xcov'*cov_grad;
+	 setarray cov_gradf, i, cov_grad; @cov_grad is nc by nc dimenssional@ 
+	endif;
+ endfor; @This is the end of creation of the derivative of the cholesky factors@
+ @cov_gradf is ncov by nc by nc array, each plane holds one nc by nc matrix of the gradient of the cholesky of the error term@
+ //print "cov_gradf: " cov_gradf;
+
+ /********NEXT WE NEED TO MULTIPLY COV_GRADF WITH M***********************************************************/
+ cov_gradfff = arrayinit((nc|ncov|(nc-1)|(nc-1)),0); @Vary by chosen alternative, by ncov parameters@
+ corrj_grad = arrayinit((nc|ncov|(nc-1)|(nc-1)),0); @The (nc-1) by (nc-1) correlation matrix will be stored here, for each nc for each ncov@
+ omega_grad = arrayinit((nc|ncov|(nc-1)|1),0); @An nc by ncov by (nc-1) by 1 array@
+ covjGradVech = zeros(ncov*nc,nc*(nc-1)/2); @Will hold the vectorize portion of the full variance covariance matrix for ncov parameters and nc M values@
+ shi_r_unq = zeros(ncov*nc,(nc-1)*(nc-2)/2); @Will hold the upper triangle of corrj_grad without diagonals@  
+ for i(1,nc,1); @Need to loop through M@
+	 covjA1 = covj[(i-1)*ncDiff+1:i*ncDiff,.]; @This is an (nc-1) by (nc-1) variance covariance matrix@
+	 covjA2 = areshape(covjA1, ncov|(nc-1)|(nc-1)); @Repeating it ncov times in the covjA2 array@
+	 omegai = om[i,.]'; @Making it a column vector@ @An (nc-1) column vector@ @This is the diagonal of the variance covariance matrix@
+	 omegai = areshape(omegai,ncov|(nc-1)|1); @An ncov by (nc-1) by 1 array@
+	 app1 = MBig[(i-1)*ncDiff+1:i*ncDiff,.]; @Taking the appropriate M@
+	 app1 = areshape(app1,ncov|(nc-1)|nc); @So app1 is now an array of size ncov by (nc-1) by nc@
+	 cov_gradff = amult(amult(app1,cov_gradf),atranspose(app1,1|3|2)); @After first amult the array is of size ncov by (nc-1) by nc@@cov_gradff is of size ncov by (nc-1) by (nc-1)@
+	 omega_grad1 = diag(cov_gradff); @An ncov by (nc-1) by 1 array@
+	 corrj_grad1 = (atranspose((cov_gradff./sqrt(omegai)),1|3|2)./sqrt(omegai)) - 0.5 .* ((atranspose(((covjA2 ./(sqrt(omegai).*(omegai))) .* omega_grad1 ),1|3|2) ./(sqrt(omegai)))   + ((atranspose((covjA2 ./(sqrt(omegai))),1|3|2) ./(sqrt(omegai).*omegai)) .* omega_grad1 )) ;
+	 
+	 for j(1,ncov,1);
+		 if(_new_max_active[nvarm+rows(eqmatgam)+j]==0);
+			 covjGradVech[(i-1)*ncov+j,.] = zeros(1,nc*(nc-1)/2); 
+			 shi_r_unq[(i-1)*ncov+j,.] = zeros(1,(nc-1)*(nc-2)/2);
+		 else;
+			covjGradVech[(i-1)*ncov+j,.] = vech(arraytomat(getarray(cov_gradff,j)))'; @After vech its a column vectore, making it a row vector@
+			shi_r_unq[(i-1)*ncov+j,.] = (packr(vecr(arraytomat(getarray(corrj_grad1,j))) + vecr(miss(lowmat(reshape(99999,(nc-1),(nc-1))),99999))))';
+		endif;
+	 endfor;
+	 setarray cov_gradfff, i, cov_gradff;
+	 setarray corrj_grad, i, corrj_grad1;
+	 setarray omega_grad, i, omega_grad1;
+	clear app1, cov_gradff, covjA1, covjA2, omegai,cov_gradff, omega_grad1, corrj_grad1;
+ endfor;	
+ @cov_gradfff is a nc by ncov by (nc-1) by (nc-1) array@ @This holds the gradient of the variance covariance matrix@
+ /************END OF CREATION OF THE GRADIENT WITH RESPECT TO NCOV*******************************************************/
+ /************************************************************************************************************************/
+ 
+ v_grad = reshape(v_grad,nobs, nc*nvarm);    @Will have nobs rows and nc*nvarm columns@ @Each nc chunk is for one nvarm param@
+ v_gradG = reshape(v_gradG,nobs,nvargam*nc); @Wil have nobs rows and nc*nvargam columns@ @Each nc chunk is for one nvargam param@
+ //v_gradA = reshape(v_gradA,nobs,1*nc); @Will have nobs rows and nvardel*nc columns@ @Each chunk of nc is for one nvardel parameter@
+ //Vf_grad = v_grad~v_gradA~v_gradG; @Row conacatenation@ @Will have nc*nvarm + nc*nvargam columns and nobs rows@
+ //Vf_grad = reshape(Vf_grad, (nvarm+1+nvargam)*nobs,nc); @Will have (nvarm+nvardel+nvargam)*nobs rows and nc columns@ @First chunk of (nvarm+nvardel+nvargam) for 1st individual and so on@
+ Vf_grad = v_grad~v_gradG; @Row conacatenation@ @Will have nc*nvarm + nc*nvargam columns and nobs rows@
+ Vf_grad = reshape(Vf_grad, (nvarm+nvargam)*nobs,nc); @Will have (nvarm+nvardel+nvargam)*nobs rows and nc columns@ @First chunk of (nvarm+nvardel+nvargam) for 1st individual and so on@
+ 
+ @Both hj_grad and mu_grad are (nvarm+nvardel+nvargam)*nobs by (nc-1) matrices, each nvarm chunk is for one beta coefficient, then one gamma@
+ @Next we need to create the hj_grad, mu_grad, ha_grad & hb_grad@
+ hj_grad_bn = zeros(sumc(nvarmmb)*nobs,(nc-1));  // For botton nest betas
+ mu_grad_bn = zeros(sumc(nvarmmb)*nobs,(nc-1));  // For bottom nest betas
+ hj_grad = zeros(((nvarm+nvargam)*nobs),(nc-1)); @Each chunk of nvarm is for one beta coefficient@ @This is the mean w/o dividing by the standard deviation@
+ mu_grad = zeros(((nvarm+nvargam)*nobs),(nc-1)); @Each chunk of nvarm is for one beta coefficient@ @This is the mean divided by the standard deviation@
+ mu_grad2 = zeros(ncov*nobs,(nc-1)); @Will hold the gradient of mu with respect to the ncov parameters@
+ mq_big = (mq .*. ones(nvarm+nvargam,1)); @mq_big has nvarm*nobs +nvargam*nobs rows and 1 column@
+ for i(1,nc,1);
+	 app1 = MBig[(i-1)*ncDiff+1:i*ncDiff,.]; @Get the appropriate M depending on which alternative has been chosen@
+	 hj_grad1 = (app1*Vf_grad')';  @Repeating ALt_chosen nvarm times@ @mq holds the chosen alternative@
+	 hj_grad = hj_grad + (hj_grad1 *~ (mq_big.== i)); @hj_grad is a nvarm*nobs by (nc-1) matrix@ @Appropriate for the chosen alternative@  
+	 mu_grad = mu_grad + (hj_grad *~ (mq_big.== i))./sqrt(om[i,.]); 
+	 
+	 @This chunk is for bottom nest betas@
+	 hj_grad_bn1 = (app1*v_grad_bnf')';
+	 hj_grad_bn = hj_grad_bn + (hj_grad_bn1 *~ ((mq .*. (ones(sumc(nvarmmb),1))) .== i)); 
+	 mu_grad_bn = mu_grad_bn + (hj_grad_bn *~ ((mq .*. (ones(sumc(nvarmmb),1))) .== i)) ./ sqrt(om[i,.]);
+	 @End of chunk for bottom nest betas@
+	 
+	 @Creation of mu_grad2, derivative of mu wrt ncov parameters@
+	 omega_grad_n = arraytomat(areshape(getarray(omega_grad,i),ncov|(nc-1))); @Getting the omega_grad which is an ncov by (nc-1) matrix@
+	 mu_grad2 = mu_grad2 + 0.5 .*(((hj *~(mq .== i)).*.ones(ncov,1)).*(ones(nobs,1) .*. omega_grad_n))./(sqrt(om[i,.]).*om[i,.]);
+	 clear hj_grad1, app1, omega_grad_n;
+ endfor;
+ @Both mu_grad and hj_grad are (nvarm+nvardel+nvargam)*nobs by (nc-1) matrices, mu_grad2 is a ncov*nobs by (nc-1) matrix, each chunk of ncov is for one individual@
+  
+ @I AM IMPLEMENTING A HACK HERE WRT TO THE GRADIENT OF ALPHA; THIS HACK WORKS BECAUSE THERE IS AN OUTSIDE GOOD; OW IT WONT WORK@
+ alpha_grad1 = alpha_grad; @This corresponds to hj_grad, this is of size nobs*(nc-numout) by (nc-1)@
+ alpha_grad2 = alpha_grad1 ./ sqrt(om[1,.]); @alpha_grad2 corresponds to mu_grad@ @This works because for all people mq is 1@
+ @END OF CREATION OF ALPHA_GRAD1 AND ALPHA_GRAD2@
+   
+ @CALCULATE THE LOG LIKELIHOOD FUNCTION@ @AT THIS STAGE STORE THE PROBABILITIES AND GRADIENT, DONT WORRY ABOUT THE GRADIENT OF THE ERROR AT THIS POINT@ 
+ seedn = seednext; //A different seed is used for each individual, across iterations the seed remain the same
+ sq = seedn;
+ 
+ gg_temp = {};//The score for each individual is concatenated in gg_temp 
+  j=1;//Begining of the loop through the individual
+  do while j <= nobs;
+	@CHECK OF WHETHER THE BOTTOM NEST ALTERNATIVE HAS BEEN CHOSEN@
+ if (sumc(b[j,.]') > 0);	
+  // Case 1: only corner solutions - only one alternative is chosen - only joint normal cdf needs to be calculated
+  if m[j] == 1;
+    mu_i = -mu[j,.]; @An (nc-1) vector, corrected for the choice alternative and divided by standard deviation@ @mu_i is already a row vector@				
+	corrj_i = corrj[(mq[j]-1)*ncDiff+1:mq[j]*ncDiff,.];
+	mu_grad_i = (-mu_grad[(j-1)*(nvarm+nvargam)+1:j*(nvarm+nvargam),.]); @mu_grad_i is a nvarm+nvardel+nvargam by (nc-1) matrix@
+	mu_grad2_i = mu_grad2[(j-1)*ncov+1:j*ncov,.]; @An ncov by (nc-1) matrix@
+	shi_r_unq_i = shi_r_unq[(mq[j]-1)*ncov+1:mq[j]*ncov,.]; @This is a ncov by (nc-1)*(nc-2)/2 matrix@
+	
+	//For bottom nest betas
+	mu_grad_bn_i = (-mu_grad_bn[(j-1)*(sumc(nvarmmb))+1:j*(sumc(nvarmmb)),.]); @mu_grad_bn_i is a sumc(nvarmb) by (nc-1) matrix@
+	
+	// For alpha
+	alpha_grad2_i = (-alpha_grad2[(j-1)*(nc-numout)+1:j*(nc-numout),.]); @alpha_grad2_i is a (nc-numout) by (nc-1) matrix@
+	
+	if (nc-1) eq 1;
+		p2 = cdfn(mu_i);
+		p2_grad = pdfn(mu_i);  @In this case p2_grad is just a scalar@
+	elseif (nc-1) eq 2;
+		p2 = cdfBvn(mu_i[1],mu_i[2],corrj_i[1,2]); 
+		p2_grad = cdfbvn_grad(mu_i[1],mu_i[2],corrj_i[1,2]); //Returns column vector
+		p2_grad = p2_grad';	//Making it a row vector
+	else;
+		{ p2, p2_grad, sq } = pdfmvna(mu_i,corrj_i,seedn);	 @Here p2_grad  is a row vector@
+	endif;
+					
+	gg = ((1/p2) .* ((p2_grad[1:(nc-1)] * mu_grad_i')))~ //This is a (nvarm+nvardel+nvargam) vector
+	((1/p2) .*((p2_grad[1:(nc-1)]*mu_grad2_i')+ (p2_grad[nc:cols(p2_grad)]*shi_r_unq_i'))) ~	//The next portion is a 1 by ncov vector
+		((1/p2) .* ((p2_grad[1:(nc-1)] * alpha_grad2_i'))) ~ // This portion is a (nc-numout) sized vector
+		((1/p2) .* ((p2_grad[1:(nc-1)] * mu_grad_bn_i'))) ; // This portion is sumc(nvarmb) sized vector 
+		
+	clear mu_i, corrj_i, p1,p2, p1_grad, p2_grad, mu_grad_i, mu_grad2_i, shi_r_unq_i, mu_grad_bn_i, alpha_grad2_i;
+	
+	// Case 2: only interior soultions - all the available alternatives are chosen - only a joint normal pdf needs to be calculated
+   elseif m[j] == nc;
+		hj_i = hj[j,.]'; @Here we need hj without dividing by the standard deviation@ @hj_i is a 1 by (nc-1) vector@ @Making it a column vector@
+		covj_i = covj[(mq[j]-1)*ncDiff+1:mq[j]*ncDiff,.];
+		hj_grad_i = hj_grad[(j-1)*(nvarm+nvargam)+1:j*(nvarm+nvargam),.]; @An (nvarm+nvardel+nvargam) by (nc-1) matrix@
+		covj_grad_i = covjGradVech[(mq[j]-1)*ncov+1:mq[j]*ncov,.]; @an ncov by nc*(nc-1)/2@
+		dummy = zeros(rows(hj_i),1);
+		
+		// For bottom nest betas
+		hj_grad_bn_i = hj_grad[(j-1)*(sumc(nvarmmb))+1:j*(sumc(nvarmmb)),.]; @An (sumc(nvarmb)) by (nc-1) matrix@
+		
+		// For alpha_grad
+		alpha_grad1_i = alpha_grad1[(j-1)*(nc-numout)+1:j*(nc-numout),.]; @An (nc-numout) by (nc-1) matrix@
+		
+		p1 = pdfmvn(dummy, hj_i, covj_i); 
+		p1_grad_mean = pdfgmean(dummy,hj_i,covj_i); @Returns a column vector@
+		p1_grad_cov = pdfgcov(dummy,hj_i,vech(covj_i)); @Returns column vector@
+				
+		gg = (1/p1) .* ((p1_grad_mean[1:(nc-1)]'*(-hj_grad_i)') ~ //gg is a 1 by (nvarm+nvardel+nvargam) vector
+						(p1_grad_cov'*covj_grad_i') ~ // 2nd portion is a 1 by ncov vector
+						(p1_grad_mean[1:(nc-1)]'*(-alpha_grad1_i)') ~  // 3rd portion is a vector of size (nc-numout)
+						(p1_grad_mean[1:(nc-1)]'*(-hj_grad_bn_i)')) ;  // 3rd portion is a vector of size sumc(nvarmb)
+						
+		clear dummy, p1, hj_i, covj_i, p1_grad_mean, p1_grad_cov, hj_grad_i, covj_grad_i, hj_grad_bn_i, alpha_grad1_i;
+	
+	// Case 3: corner and interior solutions - both the joint normal pdf and joint normal cdf need to be calculated
+	else;
+		ch = seqa(1,1,(nc-1))' .* cq[j,.];
+		ch = selif(ch',(ch' .!=0))';
+		nch = seqa(1,1,(nc-1))' .* (cq[j,.].==0);
+		nch = selif(nch',(nch' .!=0))';
+		@Finally ch and nch are row vectors@
+		
+		@Make both of them column vectors@
+		ha = hj[j,ch]'; //Contains the deterministic portion of the utility for the chosen alternatives without mq in a column vector 
+		hb = hj[j,nch]'; //Conatins the deterministic portion of the utility for the non-chosen alternatives in a column vector
+		covj_i = covj[(mq[j]-1)*ncDiff+1:mq[j]*ncDiff,.]; @Getting the appropriate (nc-1) by (nc-1) matrix@
+		
+		@Gradient with respect to mean parameters@
+		ha_grad = hj_grad[(j-1)*(nvarm+nvargam)+1:j*(nvarm+nvargam),ch]; @ha_grad is a nvarm by ch matrix@
+		hb_grad = hj_grad[(j-1)*(nvarm+nvargam)+1:j*(nvarm+nvargam),nch]; @hb_grad is a nvarm by nch matrix@
+		
+		@For bottom nest beta parameters@
+		ha_grad_bn = hj_grad_bn[(j-1)*(sumc(nvarmmb))+1:j*(sumc(nvarmmb)),ch]; @ha_grad is a sumc(nvarmb) by ch matrix@
+		hb_grad_bn = hj_grad_bn[(j-1)*(sumc(nvarmmb))+1:j*(sumc(nvarmmb)),nch]; @hb_grad is a sumc(nvarmb) by nch matrix@
+		@End of changes for bottom nest beta parameters@
+		
+		@This portion is for alpha_grad@
+		alpha_grad21 = alpha_grad1[(j-1)*(nc-numout)+1:j*(nc-numout),ch]; @ha_grad is a (nc-numout) by ch matrix@
+		alpha_grad22 = alpha_grad1[(j-1)*(nc-numout)+1:j*(nc-numout),nch]; @hb_grad is a (nc-numout) by nch matrix@
+		@End of change regarding alpha_grad@
+		
+		dummy = zeros(rows(ha),1);
+		
+		p1 = pdfmvn(dummy, ha, covj_i[ch,ch]);//The joint normal pdf of the chosen alternatives without mq
+		p1_grad_mean = pdfgmean(dummy,ha,covj_i[ch,ch]); @p1_grad_mean is a column vector@
+		p1_grad_cov = pdfgcov(dummy,ha,vech(covj_i[ch,ch])); @p1_grad_cov is a column vector@
+		@The derivative of the mean wrt ncov parameter is zero@
+		
+		//Calculation of the conditional mean and the conditional variances
+		covj_inv = inv(covj_i[ch,ch]); @Take the inverse just once@
+		mu_i = hb + covj_i[nch,ch]*covj_inv*(-ha); @mu_i is nch by 1@
+		omegacov = covj_i[nch,nch] - covj_i[nch,ch]*covj_inv*covj_i[ch,nch]; //conditional covariance //An nch by nch matrix
+		cond_omega = diag(omegacov); @This is an nch by 1 vector@
+		cond_omega = areshape(cond_omega,ncov|(cols(nch)|1));
+		omegacorr = corrvc(omegacov); //calculation of the correlation // GAUSS function corrvc() should work as well
+		omegacorr = diagrv(omegacorr,ones(rows(hb),1));
+		mu_final = (-mu_i)./sqrt(diag(omegacov)); @mu_final is nch by 1@
+		
+		@Making ha_grad ch by (nvarm+nvargam) matrix@ @The 2nd portion of summation is a nch by (nvarm+nvargam) matrix@ @Making hb_grad nch by (nvarm+nvargam)@
+		mu_grad_i = hb_grad' + (covj_i[nch,ch]*covj_inv)*(-ha_grad)'; @mu_grad_i is nch by nvarm matrix@
+		mu_final_grad = (-mu_grad_i)./sqrt(diag(omegacov)); @Element by element operation@ @after taking square root st. dev. is a column vector@
+		@End of calculation of mu_final grad for mean parameters@
+		
+		@Conversion for bottom nest beta@
+		mu_grad_bn_i = hb_grad_bn' + (covj_i[nch,ch]*covj_inv)*(-ha_grad_bn)'; @mu_grad_bn_i is nch by sumc(nvarmb) matrix@
+		mu_final_grad_bn = (-mu_grad_bn_i)./sqrt(diag(omegacov)); @Element by element operation@ @after taking square root st. dev. is a column vector@
+		@End of conversion for bottom nest betas@
+		
+		@Conversion for alpha@
+		alpha_grad2_i = alpha_grad22' + (covj_i[nch,ch]*covj_inv)*(-alpha_grad21)'; @alpha_grad2_i is nch by (nc-numout) matrix@
+		alpha_grad2_iFinal = (-alpha_grad2_i)./sqrt(diag(omegacov)); @Element by element operation@ @after taking square root st. dev. is a column vector@
+		@End of conversion for alpha@
+		
+		@Calculation of derivative for ncov parameters@
+		covj_grad_array = getarray(cov_gradfff,mq[j]);
+		covj_grad_nch = covj_grad_array[.,nch,nch];
+		covj_grad_nch_ch = covj_grad_array[.,nch,ch];
+		covj_grad_ch = covj_grad_array[.,ch,ch];
+		covj_grad_ch_nch = covj_grad_array[.,ch,nch];
+		
+		covj_iarray = areshape(covj_i,ncov|(nc-1)|(nc-1)); //print "getorders(covj_iarray): " getorders(covj_iarray);
+		covj_invarray = areshape(covj_inv,ncov|cols(ch)|cols(ch)); @covj_inv is already a ch by ch matrix@ //print "getorders(covj_invarray): " getorders(covj_invarray);
+		
+		@This is the conditional variance covariance matrix, stored in an ncov by nch by nch array, each plane is for one ncov parameter@
+		
+		omegacov_grad = 
+		covj_grad_nch - 
+		amult(amult(covj_grad_nch_ch,covj_invarray),covj_iarray[.,ch,nch])+
+		amult(amult(amult(amult(covj_iarray[.,nch,ch],covj_invarray),covj_grad_ch),covj_invarray),covj_iarray[.,ch,nch]) - 
+		amult(amult(covj_iarray[.,nch,ch],covj_invarray),covj_grad_ch_nch); @this is a ncov by nch by nch array@
+		
+		cond_omega_grad = diag(omegacov_grad); @omegacov_grad is a ncov by nch by 1 array@
+		omegacov = areshape(omegacov,ncov|cols(nch)|cols(nch));
+		omegacorr_grad = (atranspose((omegacov_grad./sqrt(cond_omega)),1|3|2)./sqrt(cond_omega)) - 0.5 * ( atranspose((omegacov ./(sqrt(cond_omega).*(cond_omega)) .* cond_omega_grad ),1|3|2) ./(sqrt(cond_omega))   + ((atranspose((omegacov ./(sqrt(cond_omega))),1|3|2 )) ./(sqrt(cond_omega).*(cond_omega))) .* cond_omega_grad ) ;
+		@omegacorr_grad is a ncov by nch by nch array@
+		
+		@Gradient of the conditional mean@
+		ha_array = areshape(ha,ncov|cols(ch)|1);
+		mu_iarray = areshape(mu_i,ncov|cols(nch)|1); @Conditional mean, ncov by nch by 1@
+		@mu_grad2_i is ncov by cols(nch) by 1 array@
+		mu_grad2_i = amult(amult(covj_grad_nch_ch,covj_invarray),(-ha_array)) - amult(amult(amult(amult(covj_iarray[.,nch,ch],covj_invarray),covj_grad_ch),covj_invarray),(-ha_array));
+		mu_final_grad2 = ((-sqrt(cond_omega) ).* mu_grad2_i + 0.5 .*mu_iarray.*cond_omega_grad ./ sqrt(cond_omega) ) ./ (cond_omega); //mu_final_grad is a row vector
+		mu_final_grad2 = arraytomat(areshape(mu_final_grad2,ncov|cols(nch)));
+		
+		shi_r_unq_i = zeros(ncov,,maxc((cols(nch)*(cols(nch)-1)/2)|1));
+		covj_grad_i = zeros(ncov,cols(ch)*(cols(ch)+1)/2);
+		for i(1,ncov,1);
+			if(_new_max_active[nvarm+rows(eqmatgam)+i] == 0);
+				covj_grad_i[i,.] = zeros(1,cols(ch)*(cols(ch)+1)/2);
+				shi_r_unq_i[i,.] = zeros(1,maxc((cols(nch)*(cols(nch)-1)/2)|1));@An nch by nch matrix@
+			else;
+				cov_grad_i2 = arraytomat(getarray(cov_gradfff,(mq[j]|i)));
+				covj_grad_i[i,.] = vech(cov_grad_i2[ch,ch])';
+				shi_r_unq_i[i,.] = packr((vecr((arraytomat(getarray(omegacorr_grad,i)))) + vecr(miss(lowmat(reshape(99999,cols(nch),cols(nch))),99999))))'; @An nch by nch matrix@
+				clear cov_grad_i2;
+			endif;
+		endfor;
+		
+		if rows(hb) == 1;
+			p2 = cdfn(mu_final);
+			p2_grad = pdfn(mu_final);
+		elseif rows(hb) == 2;
+			p2 = cdfBvn(mu_final[1],mu_final[2],omegacorr[1,2]);
+			p2_grad = cdfbvn_grad(mu_final[1],mu_final[2], omegacorr[1,2]);
+			p2_grad = p2_grad'; @Making it a row vector@
+		else;
+			{p2,p2_grad,sq} = pdfmvna(mu_final',omegacorr,seedn); //p2_grad is a row vector
+		endif;
+		
+		@Making ha_grad a ch by nvarm matrix@ @mu_final_grad is already nch by (nvarm+nvargam)@
+		if(rows(hb) == 1);
+			gg = (((1/p1) .* (p1_grad_mean[1:cols(ch)]' * (-ha_grad'))) + ((1/p2) .* (p2_grad[1:cols(nch)] * mu_final_grad)))~@gg is a 1 by (nvarm+nvardel+nvargam) vector@
+			(((1/p1).*(p1_grad_cov' * covj_grad_i')) //An 1 by ncov vector
+			+ (1/p2).*(p2_grad[1:cols(nch)]*mu_final_grad2')) ~ //An 1 by ncov vector
+			(((1/p1) .* (p1_grad_mean[1:cols(ch)]' * (-alpha_grad21'))) + ((1/p2) .* (p2_grad[1:cols(nch)] * alpha_grad2_iFinal))) ~ // An 1 by (nc-numout) vector
+			(((1/p1) .* (p1_grad_mean[1:cols(ch)]' * (-ha_grad_bn'))) + ((1/p2) .* (p2_grad[1:cols(nch)] * mu_final_grad_bn))); // An 1 by sumc(nvarmb) vector
+		elseif(rows(hb)>1);
+			gg = (((1/p1) .* (p1_grad_mean[1:cols(ch)]' * (-ha_grad'))) + ((1/p2) .* (p2_grad[1:cols(nch)] * mu_final_grad)))~@gg is a 1 by (nvarm+nvardel+nvargam) vector@
+			(((1/p1).*(p1_grad_cov' * covj_grad_i')) //An 1 by ncov vector
+			+ (1/p2).*(p2_grad[1:cols(nch)]*mu_final_grad2'+ p2_grad[cols(nch)+1:cols(p2_grad)]*shi_r_unq_i')) ~ //1 by ncov vector
+			(((1/p1) .* (p1_grad_mean[1:cols(ch)]' * (-alpha_grad21'))) + ((1/p2) .* (p2_grad[1:cols(nch)] * alpha_grad2_iFinal))) ~  // An 1 by (nc-numout) vector 
+			(((1/p1) .* (p1_grad_mean[1:cols(ch)]' * (-ha_grad_bn'))) + ((1/p2) .* (p2_grad[1:cols(nch)] * mu_final_grad_bn))); // An 1 by sumc(nvarmb) vector
+		endif;
+		
+		clear ch, nch, ha, hb, covj_i, ha_grad, hb_grad, dummy, p1_grad_mean, p1_grad_cov, covj_inv, mu_i, omegacov, cond_omega,
+		omegacorr, mu_final, mu_grad_i, mu_final_grad, covj_grad_inv, covj_grad_nch, covj_grad_nch_ch, covj_grad_ch,
+		covj_iarray, covj_invarray, omegacov_grad,cond_omega_grad, omegacorr_grad, ha_array, mu_iarray, mu_grad2_i, mu_final_grad2,
+		shi_r_unq_i, covj_grad_i, ha_grad_bn, hb_grad_bn, mu_final_grad_bn, alpha_grad21, alpha_grad22, alpha_grad2_i, alpha_grad2_iFinal;
+	endif; @End of check how many alternatives have been consumed@
+
+	//print "cols(gg): " cols(gg) "(nvarm+nvargam+ncov): " (nvarm+nvargam+ncov);
+	gg_temp = gg_temp|gg; @gg is a 1 by (nvarm+nvardel+nvargam+ncov +sumc(nvarmb)) vector, for individual j@
+	
+	//print "j: " j;
+	clear gg;
+	seedn = sq;
+
+ else;  // ELSE FOR THE PEOPLE WHO DID NOT PARTICIPATE IN ANY ACTIVITY IN THE BOTTOM NEST
+	 gg_temp = gg_temp|zeros(1,nvarm+nvargam+ncov+(nc-numout)+sumc(nvarmmb));  // Will never hit this block for top nest
+ endif;  // END OF CHECK; WHETHER ANY ALTERNATIVE IS CHOSEN IN THE BOTTOM NEST
+ j = j+1;
+endo; //End of loop for individual
+
+ post_obs = ones(nobs,1); 
+ gg_temp = gg_temp *~ post_obs; @gg_temp is a nobs by nvarm matrix@
+ 
+
+ /*gradient = gg_temp[.,1:nvarm] 
+			~ (jac_gradA+gg_temp[.,nvarm+1])
+			~(jac_gradG+gg_temp[.,nvarm+1+1:nvarm+1+nvargam])
+			~gg_temp[.,nvarm+1+nvargam+1:nvarm+1+nvargam+ncov]; @Jac_grad is a nobs by nvargam matrix@ */
+			
+ @alpha is no longer a parameter in the model, so account for that@			
+ gradient = gg_temp[.,1:nvarm] 
+			~(jac_gradG+gg_temp[.,nvarm+1:nvarm+nvargam])
+			~gg_temp[.,nvarm+nvargam+1:nvarm+nvargam+ncov+(nc-numout)+sumc(nvarmmb)];
+ 
+ 
+ Gradient_Store = gradient;
+ 
+// print "meanc(selif(gradient,sumc(b') .> 0)): " meanc(selif(gradient,sumc(b') .> 0));
+ retp(gradient); 
+endp;
+
+
+
+
+// Procedure to compute the pdf of a multivariate normal
+// x is vector and s is the covariance matrix
+proc pdfmvn(x,u,s);
+ local d,p,p1,p2;
+ d = rows(x);
+ p1 = exp(-0.5*((x-u)'*inv(s)*(x-u)));
+ p2 = ((2*pi)^(d/2))*sqrt(det(s));
+ p = p1/p2;
+ retp(p);
+endp;
+
+proc(1)=pdfgmean(x,mu,s);
+    local d,p,p1,p2,p3,grad1,grad,store,ie;
+	 d = rows(x);
+	 p1 = exp(-0.5*((x-mu)'*inv(s)*(x-mu)));
+	 p2 = ((2*pi)^(d/2))*sqrt(det(s));
+	 p3 = inv(s);
+	 p = p1/p2;
+	 store = zeros(d,1);
+	 for ie(1,d,1);
+		  grad = -1*((x-mu).*p3[.,ie]); /*It should be positive, there should not be any negative sign*/
+		  grad1 = sumc(grad);
+		  grad1 = p*grad1;
+		  store[ie] = grad1;
+	 endfor;
+	 retp(store);
+endp;
+
+/*Gradient with respect to each element of the variance covariance matrix*/
+proc(1)=pdfgcov(x,mu,r);
+	local d,p1,p2,p,p4,out,i,j,diff_matrix,part11,part12,part13,part1,s,ncholerr,diff_matrix1;
+    local part21,part22,part23,part24,part2,gradient;
+    d = rows(x);
+    s = xpnd(r);
+	ncholerr = rows(r);
+    p1 = exp(-0.5*((x-mu)'*inv(s)*(x-mu)));
+    p2 = ((2*pi)^(d/2));
+    p = p1/p2;
+    p4 = inv(s);
+    out = {};
+    for i(1,ncholerr,1);
+        
+            diff_matrix1 = zeros(ncholerr,1);
+			diff_matrix1[i,1]= 1;
+			diff_matrix = xpnd(diff_matrix1);
+            
+            part11 = p4*diff_matrix;
+            part12 = diag(part11);
+            part13 = sumc(part12);
+            part1 = -0.5*part13;
+            part1 = part1/sqrt(det(s));
+            
+            part21 = (((p4*(x-mu))*(x-mu)')*p4);
+            part22 = part21*diff_matrix;
+            part23 = diag(part22);
+            part24 = sumc(part23);
+			/**The following code block should work as well**/
+			/*part21 = p4*diff_matrix*p4;
+			part22 = (x-mu)'*part21;
+			part23 = part22 * (x-mu);
+			part24 = part23;*/
+            part2 = 0.5*part24;
+            part2 = part2/sqrt(det(s));
+            
+            gradient = p*(part1 + part2);
+            out = out | gradient;
+        
+    endfor;
+    retp(out);
+endp;
+
+proc(1)=cdfbvn_grad(a,b,corr);
+    local d_a,d_b,d_corr;
+    d_a     = pdfn(a) .* cdfn((b- corr .* a) ./ sqrt(1-corr .* corr) ); //formulae found
+    d_b     = pdfn(b) .* cdfn((a- corr .* b) ./ sqrt(1-corr .* corr) ); //formuale found
+    d_corr  = (exp(-0.5*((a^2 + b^2 - 2*corr .* a .* b   ) ./ (1-corr .* corr) ))) ./ ((2*pi) * sqrt(1-corr .* corr)); //The bivariate normal pdf - why is that?
+    retp(d_a|d_b|d_corr);
+endp;

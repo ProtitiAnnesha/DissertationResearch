@@ -1,0 +1,10 @@
+Data used: National Household Travel Survey (NHTS) 2009
+
+(1) 01 MDCP forecast code two level_Emperical 05 V4 Merged_11_12_2016 Sensitivity ubran dummy: 	Forecasting code for Bi-level MDCP based on Pinjari and Bhat 2011  (GAUSS CODE)
+
+(2) 03 MDCP estimation code two level_Emperical 05_Merged_11_08_2016: 				Bi-level MDCP code with analytical gradient	(GAUSS CODE)
+
+Please refer to the following paper if you use the above codes in full or in part
+
+Enam, A., and K. Konduri. Continuous Time and Temporally Constrained Tour Pattern Generation System for Jointly Modeling Daily Tours and Stops: Application of Bilevel Multiple Discrete Continuous Probit Model. Transportation Research Record: Journal of the 16 Transportation Research Board, Vol. 6748, No. August 2016, 2017.
+

@@ -1,0 +1,1121 @@
+//Moified from Bhat's mixed MDCEV code - Annesha 2014
+
+library maxlik;
+maxset;
+
+/*****************************************************************************
+                  Global Variable Definitions
+*****************************************************************************/
+clearg __row,nobs,_config,_alp0to1,_price,nc,datatset,_po,nvarm,nvardel,nvargam;
+
+//__row    = 100;     // Number of rows to be read at a time by the log-likelihood function
+np		 = 728;		//np is the number of unique individuals in the dataset
+nobs     = 1452;    // Number of observations in the dataset
+nc       = 8;       // Number of alternatives (in the universal choice set) 
+_config  = 4;       // Utility specification configuration, possible values: 1,4,7
+                    // see the documentation for an explanation of each configuration
+_alp0to1 = 1;       // 1 if you want the Alpha values to be constrained between 0 and 1, 0 otherwise
+                    // putting _alp0to1 = 1 is recommended practice and can provide estimation stability
+_price   = 0;       // 1 if there is price variation across goods, 0 otherwise
+_errm    = 1;       // 1 if error-components in baseline utility, 0 otherwise
+_ranm    = 0;       // 1 if random components in baseline utility, 0 otherwise
+_errms   = 0;       // 1 if error-components in satiation parameters, 0 otherwise
+_ranms   = 0;       // 1 if random components in satiation parameters, 0 otherwise
+nrep     = 200;       // Number of Halton draws to be used to simulate the error-components and/or random coefficients
+
+if (_config  == 7); // The satiation parameters (alphas and gammas) are all fixed in this configuration
+  _ranms = 0; @Therefore there is no chance to have random components in the satiation parameter@
+  _errms = 0; @There is no chance to have error component in the satiation parameter@
+endif;
+
+//dataset  = "C:\\gauss7.0\\Data\\MDCEV_code\\testnout.dat"; // provide path for the gauss data matrix
+dataset  = "DataDUSTV28";
+
+@dataset that contain the number of observations for each individual@
+dataMat = loadd("DataNew"); @get the data into a matrix@
+
+irep = 2; @irep is the position of the desired column in the dataMat@ @It is a np x 1 vector@
+
+//outhalt  = "C:/gauss7.0/Data/simdata/haltbrat"; // provide path for the matrix of Halton draws (to simulate the error-components and/or random coefficients)
+outhalt  = "haltbratD08_200P.dat";
+
+
+{ pointer,_po } = indices(dataset,"CaseID"); // position of pointer to case number in data set, 
+                                             // modify if the case number column has a name different than "caseid"
+
+/*****************************************************************************
+                    Variable Specification Area
+*****************************************************************************/
+/* Position of UNO variable (i.e., the column of ones) in data set. 
+   The dataset should consist of a column of ones.
+   Modify if the label (in double-quotes) of the column of ones in your dataset is different from "uno"  */
+
+{ unov,ivuno } = indices(dataset,"uno");
+
+/* Position of SERO variable (i.e., the column of zeros) in data set. 
+   The dataset should consist of a column of zeros.
+   Modify if the label (in double-quotes) of the column of zeros in your dataset is different from "sero"  */
+
+{ serov,ivsero } = indices(dataset,"sero");
+
+/* Position of WEIGHT variable (i.e., the column of weights).
+   If the data has weights, then the dataset should consist of a column of weights.
+   Modify the label (in double-quotes) with the label of the weight variable, if your data has weights  */
+
+{ weight,wtind } = indices(dataset,"uno");
+
+/* Positions of the DEPENDENT Variables (i.e., the consumption quantities for each alternative - NOT consumption expenditures for each alternative).  
+   Provide labels (one label in each double-quote) of the dependent variables (i.e., consumption quantities) in your dataset. 
+   Number of labels = number of alternatives. */
+
+/* Note however that the likelihood function is written to be based on the probability of consumption expenditures - Equation 19 of Bhat 2008. */
+
+{ choicm,f } = indices(dataset,"MealHome"|	"MealOut"|	"Work2Dur"|	"SocHome"|	"SocOut"|	"Chores"|	"Shopping"|	"Leisure"); 
+
+/* Positions of PRICE variables
+   Provide labels of price variables (one label in each double-quote). Number of labels = number of alternatives.
+   Provide all UNO variables if there is no price variation */
+
+{ cprice,fp } = indices(dataset,"uno"|"uno"|"uno"|"uno"|"uno"|"uno"|"uno"|"uno");
+
+/* Definition of INDEPENDENT variables */
+
+/* In the following specification, ivm1, ivm2, ivm3 contain independent variable specifications (on right hand side) for baseline utility (PSI) for alternatives 1, 2, and 3;
+   Number of rows = number of alternatives;
+   Number of columns = Number of variables including alternative specific constants; consider first alternative as base  */
+
+let ivm1 = { sero           sero            sero            sero  		sero           sero            sero  };
+let ivm2 = { uno            sero            sero          	sero  		sero           sero            sero  };         
+let ivm3 = { sero           uno             sero            sero 		sero           sero            sero  };
+let ivm4 = { sero           sero            uno            	sero  		sero           sero            sero  };
+let ivm5 = { sero           sero            sero          	uno  		sero           sero            sero  };
+let ivm6 = { sero           sero            sero            sero  		uno            sero            sero  };
+let ivm7 = { sero           sero            sero            sero  		sero           uno            sero   };
+let ivm8 = { sero           sero            sero          	sero  		sero           sero            uno   };
+//let ivm9 = {};
+
+{ v1,ivmt1 } = indices(dataset,ivm1');//ivmt1 corresponds to the column numbers associated with the Ind var in the data set
+{ v2,ivmt2 } = indices(dataset,ivm2');
+{ v3,ivmt3 } = indices(dataset,ivm3');
+{ v4,ivmt4 } = indices(dataset,ivm4');
+{ v5,ivmt5 } = indices(dataset,ivm5');
+{ v6,ivmt6 } = indices(dataset,ivm6');
+{ v7,ivmt7 } = indices(dataset,ivm7');
+{ v8,ivmt8 } = indices(dataset,ivm8');
+//{ v9,ivmt9 } = indices(dataset,ivm9');
+
+/* Define labels of the parameters in the baseline utility for output printing;
+   Provide as many parameter labels as the number of columns in ivm1 (i.e., the number of variables in the Psi function) */
+
+varnam =  "ASC2"|"ASC3"|"ASC4"|"ASC5"|"ASC6"|"ASC7"|"ASC8"; 
+
+
+/* In the following specification, ivd1, ivd2, ivd3 contain input data specifications (on right hand side) for satiation parameters (Alphas) for alternatives 1, 2, and 3;
+   Number of rows = number of alternatives;
+   Number of columns = Number of alternatives; Note that you can also add individual-specific variables below, so that satiation varies across individuals; However,
+   you will then have to translate outputs to compute actual alpha parameters; This code is written to provide you with the alpha parameters directly for the case when
+   there is no variation in alpha across individuals */
+
+let ivd1 = { uno            sero            sero   sero           sero            sero sero           sero           };
+let ivd2 = { sero           uno             sero    sero           sero            sero sero           sero          };
+let ivd3 = { sero           sero            uno    sero           sero            sero sero           sero           };
+let ivd4 = { sero            sero            sero uno           sero            sero sero           sero            };
+let ivd5 = { sero           sero             sero  sero           uno            sero sero           sero           };
+let ivd6 = { sero           sero            sero  sero           sero            uno sero           sero            };
+let ivd7 = { sero            sero            sero   sero           sero            sero uno           sero          };
+let ivd8 = { sero           sero             sero sero           sero            sero sero           uno            };
+//let ivd9 = { sero           sero            sero  sero           sero            sero sero           sero            uno 	};
+
+/*Alpha = 1-exp(Delta) if Alpha < 1
+Alpha = 1-(1/(1+exp(Delta))) if 0 < Alpha < 1   */
+
+//Add a row for w4 below if there is a 4th alternative,..... (number of rows = number of alternatives)
+
+{ w1,ivdt1 } = indices(dataset,ivd1');//invdt1: column 2 3 3
+{ w2,ivdt2 } = indices(dataset,ivd2');//...
+{ w3,ivdt3 } = indices(dataset,ivd3');
+{ w4,ivdt4 } = indices(dataset,ivd4');
+{ w5,ivdt5 } = indices(dataset,ivd5');
+{ w6,ivdt6 } = indices(dataset,ivd6');
+{ w7,ivdt7 } = indices(dataset,ivd7');
+{ w8,ivdt8 } = indices(dataset,ivd8');
+//{ w9,ivdt9 } = indices(dataset,ivd9');
+
+
+/* In the following specification, ivg1, ivg2, ivg3 contain input data specifications (on the right hand side) for translation parameters (Gammas) for alternatives 1, 2, and 3
+   Add a row for ivg4 if there is a 4th alternative another additional row for ivd5 if there is a 5th alternative,.... (number of rows = number of alternatives)
+   Number of columns = Number of alternatives; Note that you can also add individual-specific variables below, so that gamma varies across individuals; However,
+   you will then have to translate outputs to compute actual gamma parameters; This code is written to provide you with the gamma parameters directly for the case when
+   there is no variation in gamma across individuals */
+
+let ivg1 = { uno     sero     sero   sero   sero    sero 	sero    sero 	};
+let ivg2 = { sero    uno      sero   sero   sero    sero 	sero    sero 	};
+let ivg3 = { sero    sero     uno    sero   sero    sero	sero    sero 	} ;
+let ivg4 = { sero    sero     sero 	 uno    sero    sero 	sero    sero 	};
+let ivg5 = { sero    sero     sero   sero   uno     sero 	sero    sero 	};
+let ivg6 = { sero    sero     sero   sero   sero    uno 	sero    sero 	};
+let ivg7 = { sero    sero     sero   sero   sero    sero 	uno     sero 	};
+let ivg8 = { sero    sero     sero   sero   sero    sero 	sero    uno  	};
+//let ivg9 = { sero           sero            sero  sero           sero            sero sero           sero            uno    };
+
+//Add a row for u4 below if there is a 4th alternative,... (number of rows = number of alternatives)
+
+{ u1,ivgt1 } = indices(dataset,ivg1');//ivgt1: column vector 2 3 3
+{ u2,ivgt2 } = indices(dataset,ivg2');
+{ u3,ivgt3 } = indices(dataset,ivg3');
+{ u4,ivgt4 } = indices(dataset,ivg4');
+{ u5,ivgt5 } = indices(dataset,ivg5');
+{ u6,ivgt6 } = indices(dataset,ivg6');
+{ u7,ivgt7 } = indices(dataset,ivg7');
+{ u8,ivgt8 } = indices(dataset,ivg8');
+//{ u9,ivgt9 } = indices(dataset,ivg9');
+
+
+ivm = ivmt1'~ivmt2'~ivmt3'~ivmt4'~ivmt5'~ivmt6'~ivmt7'~ivmt8'; // can append more: e.g. ~ivmt4'~ivmt5' and so on, based on the number of alternatives
+ivd = ivdt1'~ivdt2'~ivdt3'~ivdt4'~ivdt5'~ivdt6'~ivdt7'~ivdt8'; // can append more: e.g. ~ivdt4'~ivdt5' and so on, based on the number of alternatives
+ivg = ivgt1'~ivgt2'~ivgt3'~ivgt4'~ivgt5'~ivgt6'~ivgt7'~ivgt8'; // can append more: e.g. ~ivgt4'~ivgt5' and so on, based on the number of alternatives
+
+/* Define position of variables with random coefficients in baseline utility */
+
+if _ranm == 1;
+ posm = 3|4;      // This specification is for random coefficients on the 3rd and 4th variables (hsz-psi2 and hsz-ps3) in the specification for baseline utility
+endif;
+
+/* Define position of variables with random coefficients in Satiaion paremeters (Alphas) */
+
+if _config == 1;
+  posms = 0;
+  if _ranms == 1;
+    posms = 2|3;      // Define position of variables with random coefficients in this line; 
+  endif;              // This specification is for random coefficients on the 2nd and 3rd variables in the specification for Alphas
+endif;				  @Why only 2nd and 3rd? - why does not include 1st as well?@	
+
+/* Define position of variables with random coefficients in Satiaion paremeters (Gammas) */
+
+if _config == 4;
+  posms = 0;
+  if _ranms == 1;
+    posms = 2|3;      // Define position of variables with random coefficients in this line; 
+  endif;              // This specification is for random coefficients on the 2nd and 3rd variables in the specification for Gammas
+endif;                
+
+/* Define the error-component structure in baseline utility
+   Order the alternatives from 1 to nc in the same order as in choicm and ivm, 
+   then provide the pattern of error-components in baseline utility in the matrix 'rrm' below;
+   'rrm' is a matrix of ones and zeros of 'nc' rows and 'gerrm' columns (gerrm is number of error components you may want to try); 
+   
+   for example, if you have three alternatives and gerrm=2, and you want 1st and 3rd alternatives
+   to have a common error component, and 2nd and 3rd alternatives to have another error component,
+
+   rrm = { 1 0 , //Number of rows correspond to the numbe rof alternatives
+           0 1 , //Number of columns correspond to the number of error components you want to try
+           1 1 }; //First and third have a common error component, second and third have a common error componenet
+
+   Ordering of alternatives (rows) in 'rrm' should correspond to ordering in choicm and ivm */
+
+rrm = { 1	0	0	0	0	0	0	0 , //Eight alternatives
+       	0 	1	0	0	0	0	0	0, //Eight independent error components
+        0   0	1	0	0	0	0	0,		
+        0  	0	0	1	0	0	0	0,
+	    0   0	0	0	1	0	0	0,
+	    0   0	0	0	0	1	0	0,
+	    0   0	0	0	0	0	1	0,
+	    0   0	0	0	0	0	0	1 };
+  
+
+/* Define the structure of error-components in Satiation parameters (Alphas or Gammas)
+   Order the alternatives from 1 to nc in the same order as in choicm and ivd or ivg, 
+   then provide the pattern of error-components in satiation parameters in the matrix 'rrms' below;
+   'rrms' is a of ones and zeros of 'nc' rows and 'gerrms' columns (gerrms is number of error components you may want to try); 
+   
+   for example, if you have three alternatives and gerrms=2, and you want 1st and 3rd alternatives
+   to have a common error component, and 2nd and 3rd to have another error component,
+
+   rrms = { 1 0 ,
+            0 1 ,
+            1 1 };
+
+   Ordering of alternatives (rows) in 'rrms' should correspond to ordering in choicm and ivd or ivg;  */
+
+rrms = { 1	0	0	0	0	0	0	0 , //Eight alternatives
+       	0 	1	0	0	0	0	0	0, //Eight independent error components
+        0   0	1	0	0	0	0	0,		
+        0  	0	0	1	0	0	0	0,
+	    0   0	0	0	1	0	0	0,
+	    0   0	0	0	0	1	0	0,
+	    0   0	0	0	0	0	1	0,
+	    0   0	0	0	0	0	0	1 };
+
+
+/* Create a matrix (EQMATMSG) of ones and zeros to define constraints among the random elements in baseline preferences;
+   EQMATMSG shoud have as many columns as the number of random components (=rows(posm)+cols(rrm)) and as many rows as the
+   number of distinct standard deviations; first set (=rows(posm)) of columns refer to random coefficients, and the last set 
+   (=cols(rrm)) to error components; 
+   
+   for example, if 4 random parameters, among which 1st and 3rd random parameters are to have the same standard deviation (i.e., an equality constraint), 
+   standard deviation of the 2nd parameter is to be fixed, and the 4th parameter is to have a separate standard devation, the EQMATMSG matrix will be:
+
+   EQMATMSG = { 1 0 1 0 , //Two rows, so two seperate standard deviations need to be estimated
+                0 0 0 1 }; //Four columns, because four parameters are allowed to be distributed
+
+  Note: The order of the rows in the EQMATMSG matrix does not matter; you could also have provided the matrix for the above specification as:
+
+  EQMATMSG = { 0 0 0 1 ,
+               1 0 1 0 };
+
+  It is important to note that the starting values (in the starting values section below) of any standard deviations constrained to be equal must have identical values;
+*/
+
+if _ranm==0 and _errm==1;
+ //EQMATMSG = eye(cols(rrm));
+ EQMATMSG = ones(1,cols(rrm));
+elseif _ranm==1 .and _errm==0;
+ EQMATMSG = eye(rows(posm));
+elseif _ranm==1 .and _errm==1;
+ EQMATMSG = eye(rows(posm)+cols(rrm));
+endif;  
+
+@EQMATMSG = {1 0 0,
+			 0 1 0,
+			 0 0 1}
+THREE ROWS DESIGNATE THREE DISTINCT PARAMETERS
+FIRST TWO COLUMNS FOR THE TWO RANDOM COefficients
+THIRD COLUMN FOR THE ONE ERROR COMPONENT@
+
+//THIS IS AN IMPORTANT NOTE
+// The above specification is to estimate distinct standard deviations (without any constraints) for each random parameter in the baseline utility specification
+
+
+/* Create a matrix (EQMATMSS) of ones and zeros to define constraints among the random elements in Satiation parameters;
+   EQMATMSS shoud have as many columns as the number of random components (=rows(posms)+cols(rrms)) and as many rows as the
+   number of distinct standard deviations; first set (=rows(posms)) of columns refer to random coefficients, and the last set (=cols(rrms)) to error components; 
+   
+   for example, if 4 random parameters, among which 1st and 3rd random parameters are to have the same standard deviation (i.e., an equality constraint), 
+   standard deviation of the 2nd parameter is to be fixed, and the 4th parameter is to have a separate standard devation,
+   deviation, the EQMATMSS matrix will be:
+
+   EQMATMSS = { 1 0 1 0 ,
+                0 0 0 1 };
+
+  Note: The order of the rows in the EQMATMSS matrix does not matter; you could also have provided the matrix for the above specification as:
+
+  EQMATMSS = { 0 0 0 1,
+               1 0 1 0 };
+
+  It is important to note that the starting values (in the starting values section below) of any standard deviations constrained to be equal must have identical values;
+*/
+
+if _ranms==0 .and _errms==1;
+ //EQMATMSS = eye(cols(rrms));
+ EQMATMSS = ones(1,(cols(rrms)));
+elseif _ranms==1 .and _errms==0;
+ EQMATMSS = eye(rows(posms));
+elseif _ranms==1 .and _errms==1;
+ EQMATMSS = eye(rows(posms)+cols(rrms));
+endif;  
+
+// The above specification is to estimate distinct standard deviations (without any constraints) for each random parameter in the satiation parameters
+
+
+nvarm = cols(ivm1);         // number of variables in baseline utility   = number of columns in ivm1, do not modify this
+nvardel = cols(ivd1);       // number of variables in satiation          = number of columns in ivd1, do not modify this
+nvargam = cols(ivg1);       // number of variables in translation        = number of columns in ivg1, do not modify this
+ndimm = cols(eqmatmsg);     // number of distinct standard deviations to be estimated for the random parameters in baseline utility, do not modify this
+ndimms = cols(eqmatmss);    // number of distinct standard deviations to be estimated for the random parameters in satiation parameters, do not modify this
+//Where the number of random parameters include both error component and random paramteres
+
+if _ranm == 1; //If there are random paramters in the model
+ ivlm = reshape(ivm,nc,nvarm);
+ ivlm = reshape((ivlm[.,posm]),1,rows(posm)*nc);//One row and eight columns
+ nlm = rows(posm); @nUMBE ROF RANDOM PARAMETERS@
+endif;
+@IVLM IS SAME AS IVM, A ROW VECTOR, 
+IVM CONTAIN THE COLUMN NUMBE ROF ALL THE VAriables
+while ivlm only contain the column numbe rof the variables that are randomly distributed@
+if _ranms==1;
+  if _config==1;
+    ivlms = reshape(ivd,nc,nvardel);
+  elseif _config==4;
+    ivlms = reshape(ivg,nc,nvargam);
+  endif;
+  ivlms = reshape((ivlms[.,posms]),1,rows(posms)*nc);
+  nlms = rows(posms);
+endif;
+
+
+// Associating columns with variable names
+
+flagchm = f'; @a single row@
+flagavm = ivuno~ivuno~ivuno~ivuno~ivuno~ivuno~ivuno~ivuno;//Append as many "ivuno" as the number of alternatives; (in the current specification, all alternatives are considered to be available; if an alternative is not available, use ivsero for that alternative).
+flagprcm = fp'; @a single column@
+
+
+/******************************************************************************
+                          Starting values
+******************************************************************************/
+/* Creating matrices (EQMATDEL and EQMATGAM) of ones and zeros to define constraints across coefficients of variables;
+
+   EQMATDEL should have as many columns as the number of variables in ivd1, ivd2... specifications (i.e., specifications for satiation/alpha parameters) 
+   and as many rows as the number of distinct parameters. So if you have 5 alpha parameters, and you want the first two to be constrained to be the same, 
+   the next two also constrained to be the same, and the last separate, then the EQMATDEL matrix will be:
+   
+   EQMATDEL = { 1 1 0 0 0  ,
+                0 0 1 1 0  ,
+                0 0 0 0 1  };
+
+   EQMATGAM should have as many columns as the number of variables in ivg1, ivg2... specifications (i.e., specifications for translation/gamma parameters) 
+   and as many rows as the number of distinct parameters. So if you have 5 gamma parameters, and you want the first two to be constrained to be the same, 
+   the next two constrained to be the same, and the last separate; then the EQMATGAM matrix will be:
+   
+   EQMATGAM = { 1 1 0 0 0  ,
+                0 0 1 1 0  ,
+                0 0 0 0 1  };       */
+
+/* Below is the code for defining EQMATDEL and EQMATGAM matrices; 
+   Also, definitions for starting values of non-random parameters in baseline utility and satiation parameters (aplha/gamma) are provided;
+   These definitions correspond to restricted estimations of the alpha and gamma parameters across alternatives based on the configuration specified (see documentation) */
+
+ if _config==1;
+   EQMATDEL = eye(nvardel);
+   EQMATGAM = ones(1,nc);
+   b = zeros(nvarm,1)|zeros(rows(EQMATDEL),1)|zeros(rows(EQMATGAM),1);//in b specification taking row(EQMATDEL) becasue number of distinct alpha is the matter of concern
+   _max_active = ones(nvarm+rows(eqmatdel),1)|zeros(rows(eqmatgam),1);
+ elseif _config==4;
+   EQMATDEL = ones(1,nc);
+   EQMATGAM = eye(nvargam);
+    //b = zeros(nvarm,1)|-1000*ones(rows(EQMATDEL),1)|zeros(rows(EQMATGAM),1);
+	@Initial value of the parameters going into the baseline utility@
+	b = -3.5426|	-5.6267|	-1.035|	-2.4227|	0.1172|	-1.842|	1.8578;
+   b = b|-1000*ones(rows(EQMATDEL),1);
+   @Initial values of the paremeters going into the gamma profile@
+   b = b|3.0197|	4.2286|	2.8657|	3.4841|	4.4644|	3.7972|	3.6856|	3.0914;
+   _max_active = ones(nvarm,1)|zeros(rows(eqmatdel),1)|ones(rows(eqmatgam),1);
+ elseif _config==7;
+   EQMATDEL = ones(1,nc);
+   EQMATGAM = eye(nc);
+   //b = zeros(nvarm,1)|-1000*ones(rows(EQMATDEL),1)|zeros(rows(EQMATGAM),1);
+   b = -3.396|	-5.4795|	-1.219|	-2.4213|	-0.5928|	-2.3844|	1.034|	0.2355|	-0.2385|	0.6836|	0.3284|	0.6817|
+   0.2703|	0.3071|	-0.143|	0.7118|	0.7739|	0.9271|	0.4602|	0.3734|	0.4597|	0.5499|	0.3707|	0.2766|	0.3251|	-0.3416|	
+   -0.2337|	-0.4642|	-0.3926|	0.1077|	0.2492|	-0.0888|	0.074|	0.4474|	0.3769|	0.2273|	0.4465|	-0.23|	0.2423|
+   -0.4635|	0.2223|	0.4422|	0.3884|	0.2532|	0.2469|	0.1934|	0.2411|	0.131|	0.6474|	0.2951|	0.2172|	-0.082|	-0.9347|	
+   0.3831|	0.3448|	0.3164|	0.2967|	-0.8486|	-0.7037|	-0.4389|	-0.3652|	-0.2312|	-0.4615|	-0.179|	-0.3731|
+   1.913|	0.7459|	-0.4572|	0.4384|	-0.1128|	0.0931|	-0.3679|	-0.2308|	-0.4689|	-0.3107|	-0.1746|	
+   -0.2032|	-0.1524|	-0.3684|	-0.2404;
+	b = b|-1000*ones(rows(EQMATDEL),1)|zeros(rows(EQMATGAM),1);
+   _max_active = ones(nvarm,1)|zeros(rows(eqmatdel),1)|zeros(rows(eqmatgam),1);
+ endif;
+
+b = b|1;                            // 1 appended as a starting value for the scale parameter
+
+if _price == 1;
+  _max_active = _max_active|1;      // scale estimated if the data contains price variation
+else;
+  _max_active = _max_active|0;      // scale fixed to 1 if the data does not contain price variation
+endif; 
+
+/* Defining variable labels in satiation and translation parameter terms, 
+   and the standard deviations of the random parameters in baseline utility and satiation parameters, for output printing */
+
+  varndell = 0 $+ "D" $+ ftocv(seqa(1,1,rows(eqmatdel)),2,0);
+  varngam = 0 $+ "G" $+ ftocv(seqa(1,1,rows(eqmatgam)),2,0);
+  sd =  0 $+ "SD-bas" $+ ftocv(seqa(1,1,rows(eqmatmsg)),2,0);
+  if _config == 4; 
+   sds =  0 $+ "SD-gam" $+ ftocv(seqa(1,1,rows(eqmatmss)),2,0);
+  endif;  
+  if _config == 1;
+   sds =  0 $+ "SD-alf" $+ ftocv(seqa(1,1,rows(eqmatmss)),2,0);
+  endif;
+
+/* Below is the code to provide starting values for the random parameters */
+
+if _errm > 0 or _ranm > 0; //both error component and random parameter in baseline utility
+  if _errms == 0 and _ranms == 0;
+    ndim=ndimm;
+    //b = b|0.5*ones(rows(eqmatmsg),1);  // in this line, starting values for the random parameters are appended to the starting values of other parameters
+	b = b| 0.3874;
+    _max_active = _max_active|ones(rows(eqmatmsg),1); 
+    _max_ParNames = varnam|varndell|varngam|"sigm"|sd;
+  elseif _errms > 0 or _ranms > 0;
+    ndim=ndimm+ndimms;
+    //b = b|0.05*ones(rows(eqmatmsg),1)|0.05*ones(rows(eqmatmss),1);  // in this line starting values for the random parameters are appended to the starting values of other parameters
+	b = b|0.3852;
+	b = b|0.5*ones(rows(eqmatmss),1);
+    _max_active = _max_active|ones(rows(eqmatmsg),1)|ones(rows(eqmatmss),1); 
+    _max_ParNames = varnam|varndell|varngam|"sigm"|sd|sds;
+  endif;
+endif;
+
+// You can also provide your own starting values, which is a recommended practice to reduce the time for convergence
+
+
+/* Other Maxlik globals */
+
+_max_Options = { bfgs stepbt };
+_max_CovPar = 1;        // modify according to the type of standard errors you need
+//_max_GradTol = 0.0001;
+
+/******************************************************************************
+// ACTUAL PROGRAM AREA BEGINS, YOU DO NOT HAVE TO MODIFY ANYTHING BELOW THIS LINE
+// Format of outputs is provided in the documentation
+// Note that for the same variable specification, the number of parameters in the output depends upon the chosen configuration (i.e., _config) of the utility function 
+******************************************************************************/
+
+if _errm > 0 or _ranm > 0;
+  print nrep " non-randomized bratten-weller halton draws";
+  if _errms == 0 and _ranms == 0;
+    //_max_GradProc=&lgd1;@Not using the gradient function@
+    { x,f,g,cov,retcode } = maxprt(maxlik(dataset,0,&lpr1,b)); //If random parameters in base line utility but no random parameters in alpha or gamma use lpr1 and lgd1
+  elseif _errms > 0 or _ranms > 0;
+    ndim=ndimm+ndimms;
+    //_max_GradProc=&lgd2;         
+    { x,f,g,cov,retcode } = maxprt(maxlik(dataset,0,&lpr2,b)); //If random paramters in both baseline utility and alpha and gamma use lpr2 nd lgd2
+  endif;
+endif;
+
+
+/******************************************************************************
+                          Procedure definitions begin
+******************************************************************************/
+
+/* procedure for log likelihood function calculation with random parameters only in baseline utility */
+proc lpr1(x,dta);
+ local e1,popass,p0,xdel,xgam,v2,w2,u2,j,v,w,u,a,b,m,c,xsig,ylarge1,ylarge2,fin,as,ass,r,err,ylarge,
+   ylm1,ylm2,errm,vlm,bb,vv,vlos,ut,xsigm,xsigmm,p1,p2,p3,z,w1,z1,d,e,f,wt;
+
+ e1 = rows(dta);//No. of observations in the data file
+ wt = dta[.,wtind]; //Weight associated with each observations
+ popass = dta[.,_po]; //Column vector containing the case id
+ p0 = zeros(e1,1); //A column vector of zero, with size = number of observations
+ xdel = eqmatdel'*x[nvarm+1:nvarm+rows(eqmatdel)];//Converting delta from the number to be estimated to the number of alternatives
+ //After transposing eqmatdel there will always be only one 1 in each row
+ xgam = eqmatgam'*x[nvarm+rows(eqmatdel)+1:nvarm+rows(eqmatdel)+rows(eqmatgam)];//Same as above
+ xsigm = x[nvarm+rows(eqmatdel)+rows(eqmatgam)+1];
+ xsigmm = eqmatmsg'*x[nvarm+rows(eqmatdel)+rows(eqmatgam)+2:rows(x)];//There is no random coefficients in the satiation parameters in this case
+ v2 = (ones(nc,1) .*. x[1:nvarm])*~(dta[.,ivm])';
+ w2 = (ones(nc,1) .*. xdel)*~(dta[.,ivd])';
+ u2 = (ones(nc,1) .*. xgam)*~(dta[.,ivg])';
+
+ /* During the parameter search, sometimes the value of x[rows(x)] (i.e., the scale parameter) may go below 0. 
+    The command below helps the iterations get back on track. Note that final results will generally not be affected by this; 
+    If affected, you will get a negative value printed for sigm (scale) in the output   */
+
+ if xsigm<=0;
+   xsigm=1;
+ endif;
+
+ j=1;
+ v = {};@Deterministic portion of the utility@
+ w = {}; @delta@
+ u = {}; @Gamma@
+ do until j == nc+1;
+   v = v~(sumc(v2[(j-1)*nvarm+1:(j*nvarm),.]));
+   w = w~(sumc(w2[(j-1)*nvardel+1:(j*nvardel),.]));//Same
+   u = u~(sumc(u2[(j-1)*nvargam+1:(j*nvargam),.]));//Same
+   j = j+1;
+ endo;
+
+ clear v2,w2; @To save memory@
+
+ a = exp(w); /* a is (1-Alpha) */
+ if _alp0to1;
+   a = 1/(1+exp(w)); 
+ endif;
+
+ f = exp(u);//f is gamma
+ b = dta[.,flagchm] .> 0;//Indicaor of whether consumption is zero or not
+ m = sumc((b'));//How many consumption for each individual - one column vector
+ c = (a.*b)./((dta[.,flagchm]+f));//((1-alpha)/(x + gamma))
+ c = c./(dta[.,flagprcm]); //f by p
+ c = substute(c,b.==0,1);
+ e = (1/c).*b;  //p by f
+ d = sumc((e'));//sum over m p by f
+ c = (prodc((c'))).*d;
+ v = v-a.*ln((dta[.,flagchm]+f)./f)-ln(dta[.,flagprcm]);
+
+ if _errm==0 and _ranm==1; //No error component but random parameter
+   ylm1 = dta[.,ivlm]; //Get the variable from the data set that are distributed
+   //Order: 1st alternative, all variables; 2nd alternative, all variables, third alternative all variables
+ elseif _ranm==0 and _errm==1;//If no random component but error component
+   ylm1 = ones(e1,1) .*. reshape(rrm,1,nc*cols(rrm));
+ else; @There is both random coefficiant and error component@
+   ylm1 = reshape(dta[.,ivlm],e1*nc,nlm); //nlm is the number of random parameters in the baseline utility
+   ylm1 = ylm1~(ones(e1,1) .*. rrm);
+   ylm1 = reshape(ylm1,e1,ndim*nc);
+ endif;
+
+ /* Getting rows of halton draws*/
+ open fin = ^outhalt for read;
+ //call seekr(fin,((popass[1]-1)*nrep+11));//Move the pointer to a particular location in the file fin
+ call seekr(fin,(0*nrep+11));@Ignoring the first 10 draws - to break sequence@
+ //as = readr(fin,nrep*e1); //reads a specified number of rows from a gauss dataset
+ as = readr(fin,nrep*np); @changed e1 to np for panel estimation@ @nrep number of draws for each individual, there should be ndim number of columns@
+ as = cdfNi(as);
+ fin = close(fin);
+ //ass = (reshape(as',e1*ndim,nrep))';//ass, row: number of draws, columns: no of individuals * number of different standard deviations
+ ass = (reshape(as',np*ndim,nrep))';@Changed from e1 to np@
+	 
+ @Addition for panel estimation @
+ local rep, assNew, k, bVec, p00;
+ p00 = {};
+ ass = reshape(ass, (nrep * ndim), np)';
+ rep = dataMat[.,irep]; @Get the column with number of observation for each person@
+
+ assNew = {};
+ k = 1;
+ do while k .le np;
+	bVec = ones(rep[k],1);
+	assNew = assNew | (bVec .*. ass[k,.]);
+	k = k + 1;
+ endo;
+ assNew = reshape(assNew',nrep, (e1*ndim)); @you can use sumc(rep) instead of e1@
+ @End of addition@
+
+ r = 1;
+ do while r <= nrep;
+  //errm = (reshape((ass[r,.]),ndim,e1))';
+  errm = (reshape((assNew[r,.]),ndim,e1))'; @Change of ass to assNew@
+  ylm2 = (ones(1,nc) .*. errm).*ylm1;
+  vv = (ones(nc,1) .*. xsigmm) .* ylm2';//Multiplication of the beta with the variable
+  j=1;
+  vlm = {};
+  do until j == nc+1;
+   vlm = vlm~(sumc(vv[(j-1)*ndimm+1:(j*ndimm),.]));//sum over all the random parameters for a particular alternative
+   j = j+1;
+  endo;
+  ut = (v+vlm)./xsigm;
+  p1 = exp(ut);
+  p2 = (p1.*dta[.,flagavm])./sumc((p1.*dta[.,flagavm])');//exp(v/sigma)/sum over all  k (whether consumed or not) exp(v/sigma)
+  p3 = substute(p2,b.==0,1);
+  p3 = (prodc((p3'))).*c.*((m-1)!);
+  p3 = p3./((xsigm)^(m-1));
+  //p0=p0+p3;//p0 was previously initialized to be zero
+  //Just adding all the P3 for different random draws
+  p00 = p00 | p3'; @For panel - concatenating all the probabilities for each observation for each repitation column wise@
+  @p00 finally should be nrep x nobs matrix @
+  r = r+1;//change the row of draw
+ endo;
+ 
+ @For panel - converting the loglikelihood function from nobs x 1 vector to np x 1 vector - Annesha@
+ @by multiplying the choice probabilities for the same person@
+ local pf, rd;
+ k = 1;
+ rd = 1;
+ pf = ones(nrep,np);
+ do while k .le np;
+	 if rep[k] .== 2;
+		 pf[.,k] = p00[.,rd] .* p00[.,(rd+1)];
+	 elseif rep[k] .== 1;
+		 pf[.,k] = p00[.,rd];
+	 endif;	 
+	 rd = rd + rep[k];
+	 k = k + 1;
+ endo;
+ z = meanc(pf); @Changed for panel@ @z is now a np x 1 vector instead of a nobs x 1 vector@
+ //z = p0./nrep;//Take the average
+ //w1=zeros(e1,1);
+ w1=zeros(np,1); @changed from e1 to np for panel@
+ if z > w1;
+     z1=ln(z);
+  else;
+  print "yes";
+     z1=ln(z-((z.<=w1).*(z-0.0001)));
+ endif;
+ //retp(wt.*z1);
+ retp (z1);
+endp;
+  
+
+/* Procedure for gradient function function calculation with random parameters only in baseline utility */
+proc lgd1(x,dta);
+ local e1,popass,p0,xdel,xgam,v2,w2,u2,j,v,w,u,a,b,m,c,xsig,ylarge1,ylarge2,fin,as,ass,r,err,ylarge,
+   vv,vlos,ut,uts,f1,p1,p2,p3,z,w1,z1,d,e;
+ local gv,gd,gg,gge,g1,g1s,g2,h,g2v,g2d,g2g,g2e,ylargev,giterv,giterd,giterg,gitere;
+ local xsigm,xsigmm,xcov,xcov1,giterr,s,asr,assr,errr;
+ local bb,g2s,as1,ass1,ggr,err1,g2r,g4,g5,gitere1,wt;
+ local ylm1,ylm2,vlm,gss,gee,errm;
+
+ e1 = rows(dta);
+ wt = dta[.,wtind];
+ popass = dta[.,_po];
+ p0 = zeros(e1,1);
+ xdel = eqmatdel'*x[nvarm+1:nvarm+rows(eqmatdel)];
+ xgam = eqmatgam'*x[nvarm+rows(eqmatdel)+1:nvarm+rows(eqmatdel)+rows(eqmatgam)];
+ xsigm = x[nvarm+rows(eqmatdel)+rows(eqmatgam)+1];
+ xsigmm = eqmatmsg'*x[nvarm+rows(eqmatdel)+rows(eqmatgam)+2:rows(x)];
+ v2 = (ones(nc,1) .*. x[1:nvarm])*~(dta[.,ivm])';
+ w2 = (ones(nc,1) .*. xdel)*~(dta[.,ivd])';
+ u2 = (ones(nc,1) .*. xgam)*~(dta[.,ivg])';
+
+ j=1;
+ v = {};
+ w = {};
+ u = {};
+ do until j == nc+1;
+   v = v~(sumc(v2[(j-1)*nvarm+1:(j*nvarm),.]));
+   w = w~(sumc(w2[(j-1)*nvardel+1:(j*nvardel),.]));
+   u = u~(sumc(u2[(j-1)*nvargam+1:(j*nvargam),.]));
+   j = j+1;
+ endo;
+
+ clear v2,w2;
+
+ a = exp(w); /* a is (1-Alpha) */
+ if _alp0to1;
+   a = 1/(1+exp(w)); 
+ endif;
+
+ f = exp(u);
+ b = dta[.,flagchm] .> 0;
+ m = sumc((b'));
+ c = (a.*b)./((dta[.,flagchm]+f));
+ c = c./(dta[.,flagprcm]); 
+ c = substute(c,b.==0,1);
+ e = (1/c).*b;  
+ d = sumc((e'));
+ c = (prodc((c'))).*d;
+ v = v-a.*ln((dta[.,flagchm]+f)./f)-ln(dta[.,flagprcm]);
+
+ if _errm==0 and _ranm==1;
+   ylm1 = dta[.,ivlm];
+ elseif _ranm==0 and _errm==1;
+   ylm1 = ones(e1,1) .*. reshape(rrm,1,nc*cols(rrm));
+ else;
+   ylm1 = reshape(dta[.,ivlm],e1*nc,nlm);
+   ylm1 = ylm1~(ones(e1,1) .*. rrm);
+   ylm1 = reshape(ylm1,e1,ndim*nc);
+ endif;
+
+ /* Getting rows of halton draws for each individual */
+ open fin = ^outhalt for read;
+ //call seekr(fin,((popass[1]-1)*nrep+11));
+ call seekr(fin,(0*nrep+11));
+ //as = readr(fin,nrep*e1);
+ as = readr(fin,nrep*np); @Changed from e1 to np@
+ as = cdfNi(as);
+ fin = close(fin);
+ //ass = (reshape(as',e1*ndim,nrep))';
+ ass = (reshape(as',np*ndim,nrep))'; @Changed from e1 to np@
+
+ @New addition for panel estimation - Annesha@
+ local rep, assNew, k, bVec;
+ ass = reshape(ass, (nrep * ndim), np)';
+ rep = dataMat[.,irep]; @Get the column@
+
+ assNew = {};
+ k = 1;
+ do while k .le np;
+	bVec = ones(rep[k],1);
+	assNew = assNew | (bVec .*. ass[k,.]);
+	k = k + 1;
+ endo;
+ assNew = reshape(assNew',nrep, (e1*ndim)); @you can use sumc(rep) instead of e1@
+ @End of new Addition - Annesha@
+ 
+ gv=zeros(e1,nvarm);
+ gd=zeros(e1,nvardel);
+ gge=zeros(e1,nvargam);
+ gss=zeros(e1,1);
+ gee=zeros(e1,ndimm);
+
+ r = 1;
+ do while r <= nrep;
+  //errm = (reshape((ass[r,.]),ndim,e1))';
+  errm = (reshape((assNew[r,.]),ndim,e1))'; @Use assNew instead of ass@
+  ylm2 = (ones(1,nc) .*. errm).*ylm1;
+  vv = (ones(nc,1) .*. xsigmm) .* ylm2';
+  j=1;
+  vlm = {};
+  do until j == nc+1;
+   vlm = vlm~(sumc(vv[(j-1)*ndimm+1:(j*ndimm),.]));
+   j = j+1;
+  endo;
+  ut = (v+vlm)./xsigm;
+  uts = -ut./xsigm;
+  p1 = exp(ut);
+  p2 = (p1.*dta[.,flagavm])./sumc((p1.*dta[.,flagavm])');
+  p3 = substute(p2,b.==0,1);
+  p3 = (prodc((p3'))).*c.*((m-1)!);
+  p3 = p3./((xsigm)^(m-1));
+  p0=p0+p3;
+  g1 = (ones(e1,1) .*.eye(nc)) - (p2 .*. ones(nc,1));
+  g1 = g1.*vecr(b);
+  g1s = g1.*(uts.*.ones(nc,1));
+  j=1;
+  g2 = {};
+  g2s = {};
+  do until j == e1+1;
+   g2 = g2~(sumc(g1[(j-1)*nc+1:(j*nc),.]));
+   g2s = g2s~(sumc(g1s[(j-1)*nc+1:(j*nc),.]));
+   j = j+1;
+  endo;
+  clear g1;
+  h = dta[.,flagchm]+f;
+  g2 = (1/xsigm).*(g2').*p3;
+  g2s = (sumc(g2s)-((m-1)/xsigm)).*p3;
+  if _alp0to1 == 0;
+    g2d = g2.*(((ln(h./f)).*(-a)))+p3.*b+p3.*(e./d).*(-1);
+  else;
+   g2d = g2.*(((ln(h./f)).*(a.*(1-a))))+p3.*(a-1).*b+p3.*(e./d).*(1-a);
+  endif;
+  g2g = (g2.*(-a).*(1./h).*(-1/f).*dta[.,flagchm]+p3.*(-1./h).*b+p3.*(e./d).*(1./h)).*f;
+  g2v = ones(1,nvarm).*.g2';
+  g2d = ones(1,nvardel).*.g2d';
+  g2g = ones(1,nvargam).*.g2g';
+  g2e = (ones(1,ndimm).*.g2');
+  ylargev= dta[.,ivm];
+  giterv = (reshape((sumc(g2v.*(reshape(ylargev',nc,e1*nvarm))))',nvarm,e1))';
+  giterd = (reshape((sumc(g2d.*(reshape(((dta[.,ivd])'),nc,e1*nvardel))))',nvardel,e1))';
+  giterg = (reshape((sumc(g2g.*(reshape(((dta[.,ivg])'),nc,e1*nvargam))))',nvargam,e1))';
+  gitere = (reshape((sumc(g2e.*(reshape(ylm2',nc,e1*ndim))))',ndim,e1))';
+  gv=giterv+gv;
+  gd=giterd+gd;
+  gge=giterg+gge;
+  gss=g2s+gss;
+  gee=gitere+gee;
+  r = r+1;
+ endo;
+ retp(wt.*((gv~gd*eqmatdel'~gge*eqmatgam'~gss~gee*eqmatmsg')./p0));
+endp;
+
+
+/* procedure for log likelihood function calculation with random parameters in both baseline utility and satiation parameters */
+proc lpr2(x,dta);
+ local e1,popass,p0,xdel,xgam,v2,w2,u2,j,v,w,u,a,b,m,c,xsig,ylarge1,ylarge2,fin,as,ass,r,err,ylarge,
+   ylm1,ylm2,xsigmms,errms,vvs,ylm1s,ylm2s,errm,vlm,vlms,bb,vv,vlos,ut,xsigm,xsigmm,p1,p2,p3,z,w1,z1,
+   d,e,f,vvv,www,uuu,wt;
+
+ e1 = rows(dta); @Get the number of observations in the data file@
+ wt = dta[.,wtind]; @Get the column of weight@
+ popass = dta[.,_po]; @Get the column id vector@
+ p0 = zeros(e1,1); @Create a zero column vector@
+ xdel = eqmatdel'*x[nvarm+1:nvarm+rows(eqmatdel)]; @No chnage in this case@ @Column vector@
+ xgam = eqmatgam'*x[nvarm+rows(eqmatdel)+1:nvarm+rows(eqmatdel)+rows(eqmatgam)]; @Column vetor@
+ xsigm = x[nvarm+rows(eqmatdel)+rows(eqmatgam)+1]; @Column vector@
+ xsigmm = eqmatmsg'*x[nvarm+rows(eqmatdel)+rows(eqmatgam)+2:rows(x)-rows(eqmatmss)]; @Column vector@
+ xsigmms = eqmatmss'*x[rows(x)-rows(eqmatmss)+1:rows(x)]; @Column vector@
+ v2 = (ones(nc,1) .*. x[1:nvarm])*~(dta[.,ivm])'; @cols(ivm) x 1000 matrix@
+ w2 = (ones(nc,1) .*. xdel)*~(dta[.,ivd])'; @cols(ivd) x 1000 matrix@
+ u2 = (ones(nc,1) .*. xgam)*~(dta[.,ivg])'; @cols(ivg) x 1000 matrix@
+
+ /* During the parameter search, sometimes the value of x[rows(x)] (i.e., the scale parameter) may go below 0. 
+    The command below helps the iterations get back on track. Note that final results will generally not be affected by this; 
+    If affected, you will get a negative value printed for sigm (scale) in the output   */
+
+ if xsigm<=0;
+   xsigm=1;
+ endif;
+
+ j=1;
+ vvv = {};
+ www = {};
+ uuu = {};
+ do until j == nc+1;
+   vvv = vvv~(sumc(v2[(j-1)*nvarm+1:(j*nvarm),.])); @sum up the variables * coefficients for each alternative@ @three columns, 1000 obs@
+   www = www~(sumc(w2[(j-1)*nvardel+1:(j*nvardel),.]));
+   uuu = uuu~(sumc(u2[(j-1)*nvargam+1:(j*nvargam),.]));
+   j = j+1;
+ endo;
+
+ clear v2,w2;
+
+ if _errm==0 and _ranm==1; @No error component, random error@
+   ylm1 = dta[.,ivlm];
+ elseif _ranm==0 and _errm==1;
+   ylm1 = ones(e1,1) .*. reshape(rrm,1,nc*cols(rrm));
+ else;
+   ylm1 = reshape(dta[.,ivlm],e1*nc,nlm);
+   ylm1 = ylm1~(ones(e1,1) .*. rrm);
+   ylm1 = reshape(ylm1,e1,ndimm*nc);
+ endif;
+ @Order: 1st alt, random coeff variables, then random coeff, 2nd alt. random coeff variable then error component@
+ 
+ if _errms==0 and _ranms==1;
+   ylm1s = dta[.,ivlms];
+ elseif _ranms==0 and _errms==1;
+   ylm1s = ones(e1,1) .*. reshape(rrms,1,nc*cols(rrms));
+ else;
+   ylm1s = reshape(dta[.,ivlms],e1*nc,nlms);
+   ylm1s = ylm1s~(ones(e1,1) .*. rrms);
+   ylm1s = reshape(ylm1s,e1,ndimms*nc);
+ endif;
+
+ b = dta[.,flagchm] .> 0;@Consumption indicator for all individual for all three alternatives@
+ m = sumc((b')); @Number of consumptions for each individual, 1 column vector@
+
+ /* Getting rows of Halton draws for each individual */
+ open fin = ^outhalt for read;
+ //call seekr(fin,((popass[1]-1)*nrep+11));
+ call seekr(fin,(0*nrep+11));
+ //as = readr(fin,nrep*e1);
+ as = readr(fin,nrep*np); @Changed from e1 to np for panel@
+ as = cdfNi(as);
+ fin = close(fin);
+ //ass = (reshape(as',e1*ndim,nrep))';
+ ass = (reshape(as',np*ndim,nrep))'; @Changed from e1 to np from panel@
+
+ @Addition for panel estimation @
+ local rep, assNew, k, bVec, p00;
+ p00 = {};
+ ass = reshape(ass, (nrep * ndim), np)';
+ rep = dataMat[.,irep]; @Get the column with number of observation for each person@
+
+ assNew = {};
+ k = 1;
+ do while k .le np;
+	bVec = ones(rep[k],1);
+	assNew = assNew | (bVec .*. ass[k,.]);
+	k = k + 1;
+ endo;
+ assNew = reshape(assNew',nrep, (e1*ndim)); @you can use sumc(rep) instead of e1@
+ @End of addition@
+
+ r = 1;
+ do while r <= nrep;
+  //errm = (reshape((ass[r,.]),ndim,e1))';@Take the rth row corresponding to rth repitition, make it ndim row and 1000 col@
+  @Then transpose it to make it finally 1000 row x ndim col@
+  @ndim contains all the errors - those that are going into the baseline utility and that are going into the satiation parameter@
+  errm = (reshape((assNew[r,.]),ndim,e1))'; @Chanegd from ass to assNew@
+  errms = errm[.,ndimm+1:ndim];@Errors that going into the satiation parameter@
+  errm = errm[.,1:ndimm]; @Errors that are going into the baseline utility@
+  ylm2 = (ones(1,nc) .*. errm).*ylm1;@Error componnets will be repeated nc times, comp1 comp2 comp 3 comp1 comp2 comp3...@
+  ylm2s = (ones(1,nc).*.errms).*ylm1s;
+  @In the top two lines multiplying the error component N(0,1) with the variable@
+  @In the second two lines multiplying the coefficint with the N(0,1) * variable@
+  vv = (ones(nc,1) .*. xsigmm) .* ylm2';
+  vvs = (ones(nc,1) .*. xsigmms) .* ylm2s';
+  j=1;
+  vlm = {};
+  vlms = {};
+  do until j == nc+1;
+   vlm = vlm~(sumc(vv[(j-1)*ndimm+1:(j*ndimm),.]));
+   vlms = vlms~(sumc(vvs[(j-1)*ndimms+1:(j*ndimms),.]));
+   j = j+1;
+  endo;
+  if _config==1;
+    w=www+vlms;
+    u=uuu;
+  elseif _config==4;
+    w=www;
+    u = uuu+vlms;
+  endif;
+  a = exp(w); /* a is (1-alpha) */
+  if _alp0to1;
+    a = 1/(1+exp(w)); 
+  endif;
+  f = exp(u);
+  c = (a.*b)./((dta[.,flagchm]+f));
+  c = c./(dta[.,flagprcm]); 
+  c = substute(c,b.==0,1);
+  e = (1/c).*b; 
+  d = sumc((e'));
+  c = (prodc((c'))).*d;
+  v = vvv-a.*ln((dta[.,flagchm]+f)./f)-ln(dta[.,flagprcm]);
+  ut = (v+vlm)./xsigm;
+  p1 = exp(ut);
+  p2 = (p1.*dta[.,flagavm])./sumc((p1.*dta[.,flagavm])');
+  p3 = substute(p2,b.==0,1);
+  p3 = (prodc((p3'))).*c.*((m-1)!);
+  p3 = p3./((xsigm)^(m-1));
+  //p0=p0+p3;
+  p00 = p00|p3'; @Changed for panel estimation@
+  @For panel - concatenating all the probabilities for each observation for each repitation column wise@
+  @p00 finally should be nrep x nobs matrix @
+  r = r+1;
+ endo;
+ 
+ @For panel - converting the loglikelihood function from nobs x 1 vector to np x 1 vector - Annesha@
+ @by multiplying the choice probabilities for the same person@
+ local pf, rd;
+ k = 1;
+ rd = 1;
+ pf = ones(nrep,np);
+ do while k .le np;
+	 if rep[k] .== 2;
+		 pf[.,k] = p00[.,rd] .* p00[.,(rd+1)];
+	 elseif rep[k] .== 1;
+		 pf[.,k] = p00[.,rd];
+	 endif;	 
+	 rd = rd + rep[k];
+	 k = k + 1;
+ endo;
+ z = meanc(pf); @Changed for panel@ @z is now a np x 1 vector instead of a nobs x 1 vector@
+ 
+ //z = p0./nrep;
+ //w1=zeros(e1,1);
+ w1=zeros(np,1);@Changed from e1 to np for panel estimation@
+ if z > w1;
+     z1=ln(z);
+  else;
+  print "yes";
+     z1=ln(z-((z.<=w1).*(z-0.0001)));
+ endif;
+ //retp(wt.*z1);
+ retp(z1);
+endp;
+  
+
+/* procedure for gradient function calculation with random parameters in baseline utility and satiation parameters */
+proc lgd2(x,dta);
+ local e1,popass,p0,xdel,xsigm,xsigmm,xgam,v2,w2,u2,j,v,w,u,a,b,m,c,xsig,ylarge1,ylarge2,fin,as,ass,r,err,ylarge,
+   vv,vlos,ylm1,ylm2,ylm1s,ylm2s,errm,vlm,vlms,ut,uts,p1,p2,p3,z,w1,z1,d,e,f;
+ local gv,gd,gg,gge,gss,gee,g1,g1s,g2,h,g2v,g2d,g2g,g2e,ylargev,giterv,giterd,giterg,gitere;
+ local xcov,xcov1,giterr,s,asr,assr,errr,xsigmms,errms,vvs;
+ local bb,g2s,as1,ass1,ggr,err1,g2r,g4,g5,gitere1,gef,giterf,g2f,vvv,www,uuu,wt;
+
+ e1 = rows(dta);
+ wt = dta[.,wtind];
+ popass = dta[.,_po];
+ p0 = zeros(e1,1);
+ xdel = eqmatdel'*x[nvarm+1:nvarm+rows(eqmatdel)];
+ xgam = eqmatgam'*x[nvarm+rows(eqmatdel)+1:nvarm+rows(eqmatdel)+rows(eqmatgam)];
+ xsigm = x[nvarm+rows(eqmatdel)+rows(eqmatgam)+1];
+ xsigmm = eqmatmsg'*x[nvarm+rows(eqmatdel)+rows(eqmatgam)+2:rows(x)-rows(eqmatmss)];
+ xsigmms = eqmatmss'*x[rows(x)-rows(eqmatmss)+1:rows(x)];
+ v2 = (ones(nc,1) .*. x[1:nvarm])*~(dta[.,ivm])';
+ w2 = (ones(nc,1) .*. xdel)*~(dta[.,ivd])';
+ u2 = (ones(nc,1) .*. xgam)*~(dta[.,ivg])';
+
+ j=1;
+ vvv = {};
+ www = {};
+ uuu = {};
+ do until j == nc+1;
+   vvv = vvv~(sumc(v2[(j-1)*nvarm+1:(j*nvarm),.]));
+   www = www~(sumc(w2[(j-1)*nvardel+1:(j*nvardel),.]));
+   uuu = uuu~(sumc(u2[(j-1)*nvargam+1:(j*nvargam),.]));
+   j = j+1;
+ endo;
+
+ clear v2,w2;
+
+ if _errm==0 and _ranm==1;
+   ylm1 = dta[.,ivlm];
+ elseif _ranm==0 and _errm==1;
+   ylm1 = ones(e1,1) .*. reshape(rrm,1,nc*cols(rrm));
+ else;
+   ylm1 = reshape(dta[.,ivlm],e1*nc,nlm);
+   ylm1 = ylm1~(ones(e1,1) .*. rrm);
+   ylm1 = reshape(ylm1,e1,ndimm*nc);
+ endif;
+ if _errms==0 and _ranms==1;
+   ylm1s = dta[.,ivlms];
+ elseif _ranms==0 and _errms==1;
+   ylm1s = ones(e1,1) .*. reshape(rrms,1,nc*cols(rrms));
+ else;
+   ylm1s = reshape(dta[.,ivlms],e1*nc,nlms);
+   ylm1s = ylm1s~(ones(e1,1) .*. rrms);
+   ylm1s = reshape(ylm1s,e1,ndimms*nc);
+ endif;
+
+ b = dta[.,flagchm] .> 0;
+ m = sumc((b'));
+
+ /* Getting rows of Halton draws for each individual */
+ open fin = ^outhalt for read;
+ //call seekr(fin,((popass[1]-1)*nrep+11));
+ call seekr(fin,(0*nrep+11));
+ as = readr(fin,nrep*e1);
+ as = cdfNi(as);
+ fin = close(fin);
+ ass = (reshape(as',e1*ndim,nrep))';
+
+ gv=zeros(e1,nvarm);
+ gd=zeros(e1,nvardel);
+ gge=zeros(e1,nvargam);
+ gss=zeros(e1,1);
+ gee=zeros(e1,ndimm);
+ gef= zeros(e1,ndimms);
+
+ r = 1;
+ do while r <= nrep;
+  errm = (reshape((ass[r,.]),ndim,e1))';
+  errms = errm[.,ndimm+1:ndim];
+  errm = errm[.,1:ndimm];
+  ylm2 = (ones(1,nc) .*. errm).*ylm1;
+  ylm2s = (ones(1,nc).*.errms).*ylm1s;
+  vv = (ones(nc,1) .*. xsigmm) .* ylm2';
+  vvs = (ones(nc,1) .*. xsigmms) .* ylm2s';
+  j=1;
+  vlm = {};
+  vlms = {};
+  do until j == nc+1;
+   vlm = vlm~(sumc(vv[(j-1)*ndimm+1:(j*ndimm),.]));
+   vlms = vlms~(sumc(vvs[(j-1)*ndimms+1:(j*ndimms),.]));
+   j = j+1;
+  endo;
+  if _config==1;
+    w=www+vlms;
+    u=uuu;
+  elseif _config==4;
+    w=www;
+    u = uuu+vlms;
+  endif; 
+  a = exp(w);
+  if _alp0to1;
+    a = 1/(1+exp(w)); 
+  endif;
+  f = exp(u);
+  b = dta[.,flagchm] .> 0;
+  m = sumc((b'));
+  c = (a.*b)./((dta[.,flagchm]+f));
+  c = c./(dta[.,flagprcm]); 
+  c = substute(c,b.==0,1);
+  e = (1/c).*b; 
+  d = sumc((e'));
+  c = (prodc((c'))).*d;
+  v = vvv-a.*ln((dta[.,flagchm]+f)./f)-ln(dta[.,flagprcm]);
+  ut = (v+vlm)./xsigm;
+  uts = -ut./xsigm;
+  p1 = exp(ut);
+  p2 = (p1.*dta[.,flagavm])./sumc((p1.*dta[.,flagavm])');
+  p3 = substute(p2,b.==0,1);
+  p3 = (prodc((p3'))).*c.*((m-1)!);
+  p3 = p3./((xsigm)^(m-1));
+  p0=p0+p3;
+  g1 = (ones(e1,1) .*.eye(nc)) - (p2 .*. ones(nc,1));
+  g1 = g1.*vecr(b);
+  g1s = g1.*(uts.*.ones(nc,1));
+  j=1;
+  g2 = {};
+  g2s = {};
+  do until j == e1+1;
+   g2 = g2~(sumc(g1[(j-1)*nc+1:(j*nc),.]));
+   g2s = g2s~(sumc(g1s[(j-1)*nc+1:(j*nc),.]));
+   j = j+1;
+  endo;
+  clear g1;
+  h = dta[.,flagchm]+f;
+  g2 = (1/xsigm).*(g2').*p3;
+  g2s = (sumc(g2s)-((m-1)/xsigm)).*p3;
+  if _alp0to1 == 0;
+    g2d = g2.*(((ln(h./f)).*(-a)))+p3.*b+p3.*(e./d).*(-1);
+  else;
+   g2d = g2.*(((ln(h./f)).*(a.*(1-a))))+p3.*(a-1).*b+p3.*(e./d).*(1-a);
+  endif;
+  g2g = (g2.*(-a).*(1./h).*(-1/f).*dta[.,flagchm]+p3.*(-1./h).*b+p3.*(e./d).*(1./h)).*f;
+  if _config==1;
+    g2f = (ones(1,ndimms).*.g2d');
+  elseif _config==4;
+    g2f = (ones(1,ndimms).*.g2g');
+  endif;
+  g2v = ones(1,nvarm).*.g2';
+  g2d = ones(1,nvardel).*.g2d';
+  g2g = ones(1,nvargam).*.g2g';
+  g2e = (ones(1,ndimm).*.g2');
+  ylargev= dta[.,ivm];
+  giterv = (reshape((sumc(g2v.*(reshape(ylargev',nc,e1*nvarm))))',nvarm,e1))';
+  giterd = (reshape((sumc(g2d.*(reshape(((dta[.,ivd])'),nc,e1*nvardel))))',nvardel,e1))';
+  giterg = (reshape((sumc(g2g.*(reshape(((dta[.,ivg])'),nc,e1*nvargam))))',nvargam,e1))';
+  gitere = (reshape((sumc(g2e.*(reshape(ylm2',nc,e1*ndimm))))',ndimm,e1))';
+  giterf = (reshape((sumc(g2f.*(reshape(ylm2s',nc,e1*ndimms))))',ndimms,e1))';
+  gv=giterv+gv;
+  gd=giterd+gd;
+  gge=giterg+gge;
+  gss=g2s+gss;
+  gee=gitere+gee;
+  gef=giterf+gef;
+  r = r+1;
+ endo;
+ retp(wt.*((gv~gd*eqmatdel'~gge*eqmatgam'~gss~gee*eqmatmsg'~gef*eqmatmss')./p0));
+endp;
+

@@ -1,0 +1,3 @@
+Please cite the following paper if you use the GAUSS code in full or in part:
+
+Angueira, J., Faghih-Imani, A., Enam, A., Konduri, K. C., & Eluru, N. (2015). Exploration of Short-Term Vehicle Utilization Choices in Households with Multiple Vehicle Types. Transportation Research Record: Journal of the Transportation Research Board, (2493), 39-47.

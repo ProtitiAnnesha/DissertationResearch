@@ -1,0 +1,460 @@
+// Protiti Annesha, Spring, 2014
+
+new;		//Clears current workspace
+ 
+output file = LatSegVNf5PooledScaled.txt reset; 
+
+library maxlik;
+maxset; //reset global variables in the successive execution of the file
+
+/*****************************************************************************
+                  Global Variable Definitions
+*****************************************************************************/
+clearg __row,nobs,nc,datatset,nvarm, _config, nSeg; //clears global symbols by setting them eqaul to zero
+
+__row    = 100;     // Number of rows to be read at a time by the log-likelihood function
+nobs     = 8426;    // Number of observations in the dataset
+nc       = 4;       // Number of alternatives (in the universal choice set) in the vehicle type choice model
+nSeg 	 = 2;		//Deines how many segments in latent segmentation
+_config  = 5;        //1 - estimates vehicle type choice model, without distance in the utility
+					//2 - estimates vehicle type choice model, with distance in the utility
+					//3 - estimates distance choice model, with vehicle type choice in the specification
+					//4 - estimates distance choice model, without vehicle type choice in the specification
+					//5 - Latent segmentation model
+					//6 - Joint estimation of vehicle type choice and distance choice, where vehicle choice affecting distance choice
+					//7 - Joint estimation of vehicle type choice and distance choice, where Distance choice affect vehicle type choice
+nSc      = 10;		//How many additional scale parameters do you want to estimate
+EqSc     = 0;		//1 if same scale is used in the two vehicle type choice and two distance choice models, 0 OW
+@if same scales are used the b should have 6 additional initial values@
+@if differet scales are used b should have 10 additional initial values@
+dataset  = "Pooled"; //provide path for the gauss data matrix
+
+/*****************************************************************************
+                    Variable Specification Area
+*****************************************************************************/
+/* Position of UNO variable (i.e., the column of ones) in data set. */
+
+{ unov,ivuno } = indices(dataset,"uno");
+
+/* Position of SERO variable (i.e., the column of zeros) in data set. */
+
+{ serov,ivsero } = indices(dataset,"sero");
+
+
+/* Positions of the DEPENDENT Variables (i.e., the choice of vehicle coded in 0 or 1)
+   Number of labels = number of alternatives. */
+
+
+{ choicC,Ch } = indices(dataset,"AUTO_USED"|	"VAN_USED"|	"SUV_USED"|	"TRUCK_USED"); 
+
+/* Positions of the Availability Variables (i.e., the availability of vehicle coded in 0 or one)
+   Number of labels = number of alternatives. */
+
+
+{ choicA,Av} = indices(dataset,"AUTO_AVAIL"|	"VAN_AVAIL"|	"SUV_AVAIL"|	"TRUCK_AVAIL");
+
+/* Positions of the DEPENDENT Variables for regression model */
+
+
+{ choicR,ChDs } = indices(dataset,"DIST"); 
+
+/*Position of the variable for which you want to estimate a different scale of error - should be a dummy, defined as 1,0*/
+{ la, laI } = indices(dataset, "LA_IND");
+{ ny, nyI } = indices(dataset, "NY_IND");
+{ dc, dcI } = indices(dataset, "DC_IND");
+
+/* Definition of INDEPENDENT variables */
+
+/* In the following specification, ivm1, ivm2, ivm3 contain independent variable specifications (on right hand side) for utility for alternatives 1, 2, 3 and 4;*/
+/*1 - Auto, 2 - Van, 3 - SUV, 4 - Truck*/
+/*ivm1,2,3..4 -  utility specification of the vehicle type choice model without distance*/
+   
+let ivm1 = { uno           sero           sero 	};//LA_IND	sero 	sero 	NY_IND	sero 	sero };
+let ivm2 = { sero          uno            sero  };//sero 	LA_IND 	sero 	sero  	NY_IND 	sero };
+let ivm3 = { sero          sero           uno   };//sero 	sero	LA_IND 	sero  	sero 	NY_IND };     
+let ivm4 = { sero          sero           sero  };//sero 	sero 	sero 	sero 	sero 	sero };
+
+//Add a row for v4 below if there is a 4th alternative, another additional row for v5 if there is a 5th alternative,.... (number of rows = number of alternatives)
+
+{ v1,ivmt1 } = indices(dataset,ivm1');//ivmt1 corresponds to the column numbers associated with the Ind var in the data set
+{ v2,ivmt2 } = indices(dataset,ivm2');
+{ v3,ivmt3 } = indices(dataset,ivm3');
+{ v4,ivmt4 } = indices(dataset,ivm4');
+
+/*Independent variable specification for utility of the vehicle type choice model, where the vehicle type choice include distance*/
+/*ivn1,2,3..4 -  utility specification of the vehicle type choice model with distance*/
+   
+let ivn1 = { uno           sero           sero          DIST	sero  	sero 	LA_IND	};//NY_IND	};//sero 	sero };
+let ivn2 = { sero          uno            sero          sero	DIST  	sero	sero };// 	sero 	};//sero 	sero  	NY_IND 	sero };
+let ivn3 = { sero          sero           uno           sero  	sero	DIST 	sero };// 	sero	};//LA_IND 	sero  	sero 	NY_IND };     
+let ivn4 = { sero          sero           sero          sero  	sero	sero 	sero };// 	sero 	};//sero 	sero 	sero 	sero  };
+
+//Add a row for v4 below if there is a 4th alternative, another additional row for v5 if there is a 5th alternative,.... (number of rows = number of alternatives)
+
+{ vn1,ivnt1 } = indices(dataset,ivn1');//ivmt1 corresponds to the column numbers associated with the Ind var in the data set
+{ vn2,ivnt2 } = indices(dataset,ivn2');
+{ vn3,ivnt3 } = indices(dataset,ivn3');
+{ vn4,ivnt4 } = indices(dataset,ivn4');
+
+/*Independent variable specification for regression model - with vehicle choice in the equation*/
+let ivr1 = {uno 	AUTO_USED	VAN_USED	SUV_USED };	//LA_IND 	NY_IND };
+
+{ vr1,ivrt1 } = indices(dataset,ivr1');
+
+/*Independent variable specification for regression model - without vehicle choice in the equation*/
+let ivs1 = {uno LA_IND 	NY_IND };
+
+{ vs1,ivst1 } = indices(dataset,ivs1');
+
+/*Independent variable specification for utility of Latent segmentation*/
+/*ivl,2 -  utility specification of the latent segmentation model*/
+   
+let ivl1 = { uno };//LA_IND 	NY_IND };
+let ivl2 = { sero };//sero 		sero };
+
+
+//Add a row for v4 below if there is a 4th alternative, another additional row for v5 if there is a 5th alternative,.... (number of rows = number of alternatives)
+
+{ vl1,ivlt1 } = indices(dataset,ivl1');//ivlt1 corresponds to the column numbers associated with the Ind var in the data set
+{ vl2,ivlt2 } = indices(dataset,ivl2');
+
+
+/* Define labels of the parameters in the baseline utility for output printing;
+   Provide as many parameter labels as the number of columns in ivm1 (i.e., the number of variables in the Psi function) */
+if _config == 1;
+	varnam =  "ASC-Auto"|"ASC-Van"|"ASC-Suv"|"hhsiz_A"|"nTrip_A"|"rural_A"|"fem_A"|"nWor_A"|"cler_A"|"mfg_A"|"disc_V"|"vehAvVan"|"highinc_V"|"elder_V"|"cleric_V"|"mfg_Van"|"flex_Van"|"hhsiz_S"|"cleric_S"|"mfg_S"|"flex_Suv"|"BlackScl"|"AsianScl";
+elseif _config == 2;
+	varnam = "ASC-Auto"|"ASC-Van"|"ASC-Suv"|"dist_Au"|"rural_Au"|"nWorkerAu"|"clerc_Au"|"mfg_Au"|"dist_van"|"aval_Van"|"dist_suv"|"size_suv"|"main_suv"|"mfg_suv"|"flex_suv"|"BlackScl"|"AsianScl";
+elseif _config == 3;
+	varnam = "const"|"auto"|"van"|"suv"|"newveh"|"oldveh"|"numtrips"|"main_dum"|"avail"|"rural"|"female"|"elder"|"sigma"|"sigmaB"|"sigmaA";
+elseif _config == 4;
+	varnam = "const"|"hhsize"|"disc_trp"|"veh_avl"|"sigma"|"sigmaB"|"sigmaA";
+elseif _config == 5;
+	//varnam = "constL"|"LA_Lt"|"Ny_Lt"|"ASC-Auto1"|"ASC-Van1"|"ASC-Suv1"|"LA_Au_1"|"LA_Va_1"|"LA_Su_1"|"Ny_Au_1"|"Ny_Va_1"|"Ny_Su_1"|"ASC-Aut2"|"ASC-Van2"|"ASC-Suv2"|"dist_Au2"|"distVan2"|"distSuv2"|"LA_Au_2"|"LA_Va_2"|"LA_Su_2"|"Ny_Au_2"|"Ny_Va_2"|"Ny_Su_2"|"const1"|"auto1"|"van1"|"suv1"|"La_rg1"|"Ny_rg1"|"sigma1"|"const2"|"La_rg2"|"Ny_rg2"|"sigma2"|"Sc_La_Lt"|"Sc_Ny_Lt"|"Sc_La_V1"|"Sc_Ny_V1"|"Sc_La_V2"|"Sc_Ny_V2"|"Sc_La_D1"|"Sc_Ny_D1"|"Sc_La_D2"|"Sc_Ny_D2";
+	varnam = "constL"|"ASC-Auto1"|"ASC-Van1"|"ASC-Suv1"|"ASC-Aut2"|"ASC-Van2"|"ASC-Suv2"|"dist_Au2"|"distVan2"|"distSuv2"|"LA_Veh2"|"const1"|"auto1"|"van1"|"suv1"|"sigma1"|"const2"|"LA_reg2"|"NY_reg2"|"sigma2"|"Sc_La_Lt"|"Sc_Ny_Lt"|"Sc_La_V1"|"Sc_Ny_V1"|"Sc_La_V2"|"Sc_Ny_V2"|"Sc_La_D1"|"Sc_Ny_D1"|"Sc_La_D2"|"Sc_Ny_D2";
+elseif _config == 6;
+	varnam = "ASC-Auto"|"ASC-Van"|"ASC-Suv"|"hhsiz_A"|"nTrip_A"|"rural_A"|"fem_A"|"nWor_A"|"cler_A"|"mfg_A"|"disc_V"|"vehAvVan"|"highinc_V"|"elder_V"|"cleric_V"|"mfg_Van"|"flex_Van"|"hhsiz_S"|"cleric_S"|"mfg_S"|"flex_Suv"|"constD"|"autoD"|"vanD"|"suvD"|"newvehD"|"oldvehD"|"numtripD"|"mainDumD"|"availD"|"ruralD"|"femaleD"|"elderD"|"sigmaD"|"ScVehB"|"ScVehA"|"ScDistB"|"ScDistA";
+elseif _config == 7;
+	varnam = "ASC-Auto"|"ASC-Van"|"ASC-Suv"|"dist_Au"|"rural_Au"|"nWorkerAu"|"clerc_Au"|"mfg_Au"|"dist_van"|"aval_Van"|"dist_suv"|"size_suv"|"main_suv"|"mfg_suv"|"flex_suv"|"constD"|"hhsizeD"|"discTrpD"|"vehAvlD"|"sigmaD"|"ScVehB"|"ScVehA"|"ScDistB"|"ScDistA";
+endif;
+
+ivm = ivmt1'~ivmt2'~ivmt3'~ivmt4'; // vehicle type choice without distance
+ivn = ivnt1'~ivnt2'~ivnt3'~ivnt4'; //vehicle type choice with distance
+ivr = ivrt1'; //distance with vehicle type choice
+ivs = ivst1'; //distance without vehicle type choice
+ivl = ivlt1'~ivlt2'; //latent segmation model
+
+if _config==1;
+	nvarm = cols(ivm1);     // number of variables in  utility   = number of columns in ivm1, do not modify this, 
+	//does not include the scale parameter
+elseif _config==2;
+	nvarm = cols(ivn1);
+	//does not include the scale parameter
+elseif _config == 3;	nvarm = cols(ivr1);//nvarm does not contain sigma of regression or scale parameters
+elseif _config == 4;	nvarm = cols(ivs1);//nvarm does not contain sigma of regression or scale parameters
+elseif _config == 6; 	nvarm = cols(ivm1) + cols(ivr1); //nvarm does not contain sigma of regression or scale parameters
+elseif _config == 7; 	nvarm = cols(ivn1) + cols(ivs1); //nvarm does not contain sigma of regression or scale parameters
+endif;
+
+// Associating columns with variable names
+vehCh = Ch'; //choice, coded 1,0
+vehAv = Av'; //Availability, coded 1, 0
+distCh = ChDs; //Chosen distance
+LaD = laI; //LA Dummy, 1 if from LA, 0 otherwise
+NyD = nyI; //NY Dummy, 1 if from NY, 0 otherwise
+
+/******************************************************************************
+                          Starting values
+******************************************************************************/
+/**Starting values from individual veh aff dist and dist aff veh models - one for latent segmentation model**/
+b = -0.9518|	1.0354|	0.0186|	0.2412|	0.2986|	0.5212|	0.5156|	0.0006|	0.0005|	0.0009|	0.2499|116.5383|	-6.9978|	7.7721|	6.7351|	
+91.8673|	28.0451|	-3.7108|	-2.8526|	17.8476;
+//b = b|0.0*(ones(nSc,1)); @Starting values for the scale@
+b = b|-0.4889|	-0.404|	1.1454|	0.6633|	-0.2197|	-0.3736|	0.1702|	0.062|	-0.053|	0.0048;
+_max_active = ones(rows(b),1);
+
+_max_ParNames = varnam;     // Appending all the parameter (or coefficient) names
+_max_Options = { bfgs stepbt };
+_max_CovPar = 1;        // modify according to the type of standard errors you need, 1 - from inverse of the hessian, 2 - information identity, 3 - sandwich estimator
+//_max_GradTol = 0.0001;
+
+if _config == 1;
+	{ x,f,g,cov,retcode } = maxprt(maxlik(dataset,0,&lpr1,b));
+elseif _config == 2;
+	{ x,f,g,cov,retcode } = maxprt(maxlik(dataset,0,&lpr2,b));
+elseif _config == 3;
+	{ x,f,g,cov,retcode } = maxprt(maxlik(dataset,0,&lpr3,b));
+elseif _config == 4;
+	{ x,f,g,cov,retcode } = maxprt(maxlik(dataset,0,&lpr4,b));
+elseif _config == 5;
+	{ x,f,g,cov,retcode } = maxprt(maxlik(dataset,0,&lpr5,b));
+elseif _config == 6;
+	{ x,f,g,cov,retcode } = maxprt(maxlik(dataset,0,&lpr6,b));
+elseif _config == 7;
+	{ x,f,g,cov,retcode } = maxprt(maxlik(dataset,0,&lpr7,b));
+endif;
+
+@A vehicle type choice model without distance@	
+proc lpr1(x,dta);
+ local v1, v, ev, j,p, m1,m2, scale;
+ v1 = (ones(nc,1) .*. x[1:nvarm])*~(dta[.,ivm])'; 
+ j=1;
+ v = {};
+ do until j == nc+1;
+   v = v~(sumc(v1[(j-1)*nvarm+1:(j*nvarm),.])); // sumc: sum accross rows for individual, basically summing up the portion of utilities for each alternative
+   j = j+1;
+ endo;
+ clear v1;
+ @m1 = x[(rows(x) - 1),1];//Take the scale parameter for black
+ m2 = x[rows(x),1];//Take the scale parameter for asian
+ scale = exp((m1 .* (dta[.,blackD])) + (m2 .* (dta[.,asianD])));//scale is m1 if belong to the group, otherwise its 1
+ ev = exp(v) .^ scale;@
+ ev = exp(v);
+ ev = ev .* dta[.,vehAv]; //nobs by nalt matrix
+ p = sumc((ev .* dta[.,vehCh])') ./(sumc(ev'));
+ retp(ln(p));
+endp;
+ 
+@A vehicle type choice model with distance@	
+proc lpr2(x,dta);
+ local v1, v, ev, j,p, m1, m2, scale;
+ v1 = (ones(nc,1) .*. x[1:nvarm])*~(dta[.,ivn])'; 
+ j=1;
+ v = {};
+ do until j == nc+1;
+   v = v~(sumc(v1[(j-1)*nvarm+1:(j*nvarm),.])); // sumc: sum accross rows for individual, basically summing up the portion of utilities for each alternative
+   j = j+1;
+ endo;
+ clear v1;
+ @m1 = x[(rows(x) - 1),1];//Take the scale parameter for black
+ m2 = x[rows(x),1];//Take the scale parameter for asian
+ scale = exp((m1 .* (dta[.,blackD])) + (m2 .* (dta[.,asianD])));//scale is m1 if belong to the group, otherwise its 1
+ ev = exp(v) .^ scale;@
+ ev = exp(v);
+ ev = ev .* dta[.,vehAv]; //nobs by nalt matrix
+ p = sumc((ev .* dta[.,vehCh])') ./(sumc(ev'));
+ retp(ln(p));
+endp;
+
+/****Regression with discrete****/
+proc lpr3(x,dta);
+ local v1, v, p, m, m1, m2, sigma;
+ v1 = x[1:nvarm]*~(dta[.,ivr])'; 
+ v = sumc(v1); // contain regression equation for each individual
+ clear v1;
+ m = x[(rows(x))]; //The general sigma
+ @m1 = x[(rows(x) - 1)]; //Sigma for the black people
+ m2 = x[rows(x)];  //Sigma for the asian people
+ sigma = exp((m .* (1 - (dta[.,blackD] + dta[.,asianD]))) + (m1 .* dta[.,blackD]) + (m2 .* dta[.,asianD]));//Now sigma is a vector of size number of observations@
+ sigma = m;
+ p = (1 ./ sigma) .* pdfn((dta[.,distCh] - v) ./ sigma); 
+  retp(ln(p));
+endp;
+ 
+/****Regression without Discrete****/ 
+proc lpr4(x,dta);
+ local v1, v, p, m, m1, m2, sigma;
+ v1 = x[1:nvarm]*~(dta[.,ivs])'; 
+ v = sumc(v1); // contain regression equation for each individual
+ clear v1;
+ m = exp(x[(rows(x))]); //The general sigma
+ @m1 = exp(x[(rows(x) - 1)]); //Sigma for the black people
+ m2 = exp(x[rows(x)]);  //Sigma for the asian people
+ sigma = exp((m .* (1 - (dta[.,blackD] + dta[.,asianD]))) + (m1 .* dta[.,blackD]) + (m2 .* dta[.,asianD]));//Now sigma is a vector of size number of observations@
+ sigma = m;
+ p = (1 ./ sigma) .* pdfn((dta[.,distCh] - v) ./ sigma); 
+  retp(ln(p));
+endp; 
+
+/**Procedure to calculate loglik function of latent segmentation model**/
+proc lpr5 (x, dta);
+ local count, m, m1, m2, ScLat, ScVeh1, ScVeh2, v1, v, ev, pL, b, j, nVar, pVeh1, pVeh2, pDist1, pDist2, sigma, p;
+ count = cols(ivl1) + cols(ivm1) + cols(ivn1) + cols(ivr1) + 1 + cols(ivs1) + 1; //Number of columns except the scale parameters
+ nVar = cols(ivl1); //Number of variables in the latent segmentation model
+ b = x[1:nVar];	//Take the betas going into the latent segmentation model
+ v1 = (ones(nSeg,1) .*. b)*~(dta[.,ivl])'; //assuming two groups in latent segmentation model
+ j=1;
+ v = {};
+ do until j == nSeg+1;
+	v = v~(sumc(v1[(j-1)*nVar+1:(j*nVar),.])); // sumc: sum accross rows for individual, basically summing up the portion of utilities for each alternative
+	j = j+1;
+ endo;
+ clear v1;
+ m1 = x[(count + 1)];//Take the scale for LA 
+ m2 = x[(count + 2)];//Take the scale for NY 
+ ScLat = exp((m1 .* dta[.,LaD]) + (m2 .* dta[.,NyD]));
+ ev = exp(v) .^ (1 ./ ScLat); //nobs by nalt matrix, multiply by the scale where appropriate - exp(x) .^ a = exp(xa)
+ @ev = exp(v);@
+ pL = ev  ./(sumc(ev'));
+ 
+ /****Vehicle type choice 01****/
+ nVar = cols(ivm1);
+ b = x[(cols(ivl1)+1):(cols(ivl1) + cols(ivm1))];
+ v1 = (ones(nc,1) .*. b)*~(dta[.,ivm])'; 
+ j=1;
+ v = {};
+ do until j == nc+1;
+   v = v~(sumc(v1[(j-1)*nVar+1:(j*nVar),.])); // sumc: sum accross rows for individual, basically summing up the portion of utilities for each alternative
+   j = j+1;
+ endo;
+ clear v1, m1, m2;
+ m1 = x[(count + 3)];//Take the scale for LA 
+ m2 = x[(count + 4)];//Take the scale for NY 
+ ScVeh1 = exp((m1 .* dta[.,LaD]) + (m2 .* dta[.,NyD]));
+ ev = exp(v) .^ (1 ./ ScVeh1);
+ @ev = exp(v);@
+ ev = ev .* dta[.,vehAv]; //nobs by nalt matrix
+ pVeh1 = sumc((ev .* dta[.,vehCh])') ./(sumc(ev'));
+ 
+ /****Vehicle type choice 02****/
+ nVar = cols(ivn1);
+ b = x[(cols(ivl1)+ cols(ivm1) + 1):(cols(ivl1) + cols(ivm1)+ cols(ivn1))];
+ v1 = (ones(nc,1) .*. b)*~(dta[.,ivn])'; 
+ j=1;
+ v = {};
+ do until j == nc+1;
+   v = v~(sumc(v1[(j-1)*nVar+1:(j*nVar),.])); // sumc: sum accross rows for individual, basically summing up the portion of utilities for each alternative
+   j = j+1;
+ endo;
+ clear v1, m1, m2;
+ if EqSc .== 1;
+	 ScVeh2 = ScVeh1;
+ elseif EqSc .== 0;
+	 m1 = x[(count + 5)];//Take the scale for LA 
+	 m2 = x[(count + 6)];//Take the scale for NY 
+	 ScVeh2 = exp((m1 .* dta[.,LaD]) + (m2 .* dta[.,NyD]));
+ endif;
+ ev = exp(v) .^ (1 ./ ScVeh2); 
+ @ev = exp(v);@
+ ev = ev .* dta[.,vehAv]; //nobs by nalt matrix
+ pVeh2 = sumc((ev .* dta[.,vehCh])') ./(sumc(ev'));
+ 
+ /*********Distance choice 01********/
+ b = x[(cols(ivl1)+ cols(ivm1) + cols(ivn1) + 1):(cols(ivl1) + cols(ivm1)+ cols(ivn1) + cols(ivr1))];
+ v1 = b*~(dta[.,ivr])'; 
+ v = sumc(v1); // contain regression equation for each individual
+ clear v1, m1, m2;
+ m = x[(cols(ivl1) + cols(ivm1)+ cols(ivn1) + cols(ivr1) + 1)]; //original sigma
+ if EqSc .== 1;
+	m1 = x[(count + 5)]; //sigma for LA
+	m2 = x[(count + 6)]; //sigma for NY
+ elseif EqSc .== 0;	
+	m1 = x[(count + 7)]; //sigma for LA
+	m2 = x[(count + 8)]; //sigma for NY
+ endif;
+ sigma = m ./ exp((m1 .* dta[.,LaD]) + (m2 .* dta[.,NyD]));
+ @sigma = m;@
+ pDist1 = (1 ./sigma) .* pdfn((dta[.,distCh] - v) ./ sigma); 
+ 
+ /*********Distance choice 02********/
+ b = x[(cols(ivl1)+ cols(ivm1) + cols(ivn1) + cols(ivr1) + 2):(cols(ivl1) + cols(ivm1)+ cols(ivn1) + cols(ivr1) + 1 + cols(ivs1))];
+ v1 = b*~(dta[.,ivs])'; 
+ v = sumc(v1); // contain regression equation for each individual
+ clear v1, m, m1, m2;
+ m = x[(cols(ivl1) + cols(ivm1)+ cols(ivn1) + cols(ivr1) + 1 + cols(ivs1) + 1)];//Original sigma
+ if EqSc .== 1;
+	m1 = x[(count + 5)]; //sigma for black
+	m2 = x[(count + 6)]; //sigma for asian
+ elseif EqSc .== 0;	
+	m1 = x[(count + 9)]; //sigma for black
+	m2 = x[(count + 10)]; //sigma for asian
+ endif;
+ sigma = m .* exp((m1 .* dta[.,LaD]) + (m2 .* dta[.,NyD]));
+ @sigma = m;@
+ pDist2 = (1 ./ sigma) .* pdfn((dta[.,distCh] - v) ./ sigma); 
+ 
+ /*******Final probability calculation*******/
+ p = pL[.,1] .* pVeh1 .* pDist1 + pL[.,2] .* pVeh2 .* pDist2;
+ retp(ln(p));
+endp;
+ 
+/****Loglikelihood function for joint estimation of vehicle type choice and distance joint, 
+where vehicle type choice affecting distance*******/
+
+proc lpr6 (x, dta);
+ local count, m, m1, m2, scVeh, nVar, b, v1, j, v, ev, pVeh, sigma, pDist, p;
+ count = cols(ivm1) + cols(ivr1) + 1; //Number of parameters without the scale parameters, include the sigma of reg
+/****Vehicle type choice****/
+ nVar = cols(ivm1);
+ b = x[1:cols(ivm1)];
+ v1 = (ones(nc,1) .*. b)*~(dta[.,ivm])'; 
+ j=1;
+ v = {};
+ do until j == nc+1;
+   v = v~(sumc(v1[(j-1)*nVar+1:(j*nVar),.])); // sumc: sum accross rows for individual, basically summing up the portion of utilities for each alternative
+   j = j+1;
+ endo;
+ clear v1;
+ m1 = x[(count + 1)];//scale for black, veh type choice
+ m2 = x[(count + 2)];//scale for asian, veh type choice
+ //scVeh = (m1 .* (dta[.,blackD])) + (m2 .* (dta[.,asianD])) + (1 - (dta[.,blackD] + dta[.,asianD]));
+ @scVeh = exp((m1 .* (dta[.,blackD])) + (m2 .* (dta[.,asianD])));
+ ev = exp(v) .^ scVeh;@
+ ev = exp(v);
+ ev = ev .* dta[.,vehAv]; //nobs by nalt matrix
+ pVeh = sumc((ev .* dta[.,vehCh])') ./(sumc(ev'));
+ 
+ /*********Distance choice********/
+ b = x[(cols(ivm1)+ 1):(cols(ivm1) + cols(ivr1))];
+ v1 = b*~(dta[.,ivr])'; 
+ v = sumc(v1); // contain regression equation for each individual
+ clear v1, m1, m2;
+ m = x[count]; //The general sigma
+ m1 = x[(count + 3)]; //sigma for black, dist choice
+ m2 = x[(count + 4)]; //sigma for asian, dist choice
+ //sigma = m;// .* (1 - (dta[.,blackD] + dta[.,asianD])) + (m1 .* dta[.,blackD]) + (m2 .* dta[.,asianD]);
+ @sigma = exp(m .* (1 - (dta[.,blackD] + dta[.,asianD])) + (m1 .* dta[.,blackD]) + (m2 .* dta[.,asianD]));@
+ sigma = m;
+ pDist = (1 ./ sigma) .* pdfn((dta[.,distCh] - v) ./ sigma);
+ 
+ /*******Final probability calculation*******/
+ p = pVeh .* pDist;
+ retp(ln(p));
+endp;
+
+
+/****Loglikelihood function for joint estimation of vehicle type choice and distance joint, 
+where distance affects vehicle type choice*******/
+
+proc lpr7 (x, dta);
+ local count, m, m1, m2, scVeh, nVar, b, v1, j, v, ev, pVeh, sigma, pDist, p;
+ count = cols(ivn1) + cols(ivs1) + 1; //Include the sigma of regression
+/****Vehicle type choice****/
+ nVar = cols(ivn1);
+ b = x[1:cols(ivn1)];
+ v1 = (ones(nc,1) .*. b)*~(dta[.,ivn])'; 
+ j=1;
+ v = {};
+ do until j == nc+1;
+   v = v~(sumc(v1[(j-1)*nVar+1:(j*nVar),.])); // sumc: sum accross rows for individual, basically summing up the portion of utilities for each alternative
+   j = j+1;
+ endo;
+ clear v1;
+ m1 = x[(count + 1)]; //sclae for black, vehicle type choice
+ m2 = x[(count + 2)]; //scale for asian, vehicle type choice
+ //scVeh = (m1 .* dta[.,blackD] ) + (m2 .* dta[.,asianD]) + (1 - (dta[.,blackD] + dta[., asianD]));
+ @scVeh = exp((m1 .* dta[.,blackD]) + (m2 .* dta[.,asianD]));
+ ev = exp(v) .^ scVeh;@
+ ev = exp(v);
+ ev = ev .* dta[.,vehAv]; //nobs by nalt matrix
+ pVeh = sumc((ev .* dta[.,vehCh])') ./(sumc(ev'));
+ 
+ /*********Distance choice********/
+ b = x[(cols(ivn1)+ 1):(cols(ivn1) + cols(ivs1))];
+ v1 = b*~(dta[.,ivs])'; 
+ v = sumc(v1); // contain regression equation for each individual
+ clear v1, m1, m2;
+ m = x[count];
+ m1 = x[(count + 3)]; //sigma for black, dist choice
+ m2 = x[(count + 4)]; //sigma for asian, dist choice
+ @sigma = exp(m .* (1 - (dta[.,blackD] + dta[.,asianD])) + (m1 .* dta[.,blackD]) + (m2 .* dta[.,asianD]));@
+ sigma = m;
+ pDist = (1 ./sigma) .* pdfn((dta[.,distCh] - v) ./ sigma);
+ 
+ /*******Final probability calculation*******/
+ p = pVeh .* pDist;
+ retp(ln(p));
+endp;
+ 
+ 
+

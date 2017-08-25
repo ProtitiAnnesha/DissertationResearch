@@ -1,0 +1,7 @@
+Data used: American Heriatage Time Use Survey 1965, 1985, 2005, 2012
+
+(1) MDCEV with outside good_Scaled2_Final3_Summer_2017:	GAUSS code for scaled MDCEV
+(2) Pyhtod codes for plotting: 				
+	(a) PlotParticipationPercentage_6August2017: Participation % for different cohorts by age group
+	(b) DurPlot_Participated_6August2017:	     Activity duration for different cohorst by age group			
+	(c) SocDemCohort6August2017:		     Socio demographics for different cohorts by age group	

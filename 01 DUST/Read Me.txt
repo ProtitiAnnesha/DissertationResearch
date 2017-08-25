@@ -1,0 +1,5 @@
+Model ran using 2009 Disabilities and Use of Time Survey (DUST) dataset - 1452 observations from 728 individuals
+
+(1) MDCEV_Final: 			Corss-sectional MDCEV model 	 (GAUSS Code)
+(2) MixedDUSTErrComPanel_13: 		Panel MDCEV final specification  (GAUSS Code) 
+(3) MixedDUSTErrComPanel_13ConstOnly: 	Panel MDCEV constant only model  (GAUSS Code)

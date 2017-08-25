@@ -1,0 +1,2476 @@
+/*********NOTES FOR ME**********************/   
+/*In this program, for the st. dev. of the betas the lower triangle of the cholesky decomposition is provided as a column vector,
+The final st. error is also calculated for the cholesky decomposition of the variance covariance matrix
+
+the number of cholesky factor estimated should be nmix*(nmix+1)/2, where nmix is the number of random parameters*/
+
+/*For the variance covariance amtrix of the error term of the choice model, an upper triangle of the cholesky decomposition
+of the error difference is provided - the number of elements estimated in for the cholesky decomposition of the error covariance 
+is (nc-1)nc/2 if there is price variation where nc is the number of alternatives, 
+if there is no price variation there will be the top left element needs to be fixed
+
+Final standard errors are calculated for the cholesky factor*/
+
+/*Written by Annesha September 2015
+*/
+new;
+library maxlik;
+maxset;
+
+/*****************************************************************************
+                  Global Variable Definitions
+*****************************************************************************/
+clearg __row,nobs,_config,_alp0to1,_price,_ranm, _randper, _randd, nc,datatset,_po,nvarm,nvardel,nvargam, post_obs;
+clearg negative_infinity, positive_infinity, negative_infinity_d, positive_infinity_d, gradient_store, gradient_store1;
+cls;
+
+__row    = 3025;    // Number of rows to be read at a time by the log-likelihood function
+nobs     = 3025;    // Number of observations in the dataset
+_config  = 4;       // Utility specification configuration, possible values: 1, 4, 7 see the documentation for an explanation of each configuration
+_alp0to1 = 1;       // 1 if you want the Alpha values to be constrained between 0 and 1, 0 otherwise
+_price   = 0;       // 1 if there is price variation across goods, 0 otherwise
+nc       = 6;       // Number of alternatives (in the universal choice set)
+_cholk = 1;			//1 if the choice model error coefficients are estimated
+nrep = 1; 			//Number of error repititions being used for the simulation study
+
+/* Evaluation of the multivariate normal cumulative distribution function (cdf)
+   To improve running times, it is recommended to use MACML for the estimation. Otherwise, the user can use the GAUSS function 
+   cdfn to compute the cdf */
+_macml   = 1;    	// 1 if using MACML to estimate the multivariate normal cdf, 0 if using the biult-in GAUSS function
+_ranm    = 1;		// MACML variable: 1 if random coefficients in baseline preferences
+_randper = 1;       // MACML variable: random permutations of all digits 
+_randd   = 0;       // MACML variable: all permutations or random permutations
+nvar_latent = 5;	//Total number of latent variables
+nvar_mear_cont = 15; //Number of continuous indicators in the model
+nvar_mear_ordl = 0; //Number of ordinal indicators in the model
+nvar_mear = nvar_mear_cont + nvar_mear_ordl; 		//Number of measurement equations
+seednext = 983654;  // MACML variable: seed to run MACML
+
+//dataset  = "ATUSV3.dat"; // provide path for the gauss data matrix
+dataset = "C://Users//ane13003//OneDrive - University of Connecticut//ResearchCoursesOther_UCONN//HMDC Code Revision//ATUSV3.dat";
+dataMat = loadd(dataset);
+
+negative_infinity = -100;
+positive_infinity = 100;
+negative_infinity_d = 0;
+positive_infinity_d = 0;
+/*****************************************************************************
+                    Variable Specification Area
+*****************************************************************************/
+
+{ unov,ivuno } = indices(dataset,"uno");
+
+
+{ serov,ivsero } = indices(dataset,"zero");
+
+
+{ weight,wtind } = indices(dataset,"uno");
+
+/*Psotion of indicatos in the data set*/
+{ ContIndi,ContInd } = indices(dataset,"Hap1"|"Hap2"|"Hap3"|"Pain1"|"Pain2"|"Pain3"|"Sad1"|"Sad2"|"Sad3"|"Stress1"|"Stress2"|"Stress3"|"Tired1"|"Tired2"|"Tired3"); @Column munbers of the continuous indicators@ 
+
+{ OrdIndi,OrdInd } = indices(dataset," "); @Location of the ordinal indicators in the data file@
+
+/* Positions of the DEPENDENT Variables (i.e., the consumption quantities for each alternative - NOT consumption expenditures for each alternative).  
+   Provide labels (one label in each double-quote) of the dependent variables (i.e., consumption quantities) in your dataset. 
+   Number of labels = number of alternatives. */
+{ choicm,f } = indices(dataset,"ActLes"|"PasLes"|"PhyAct"|"ShNnMan"|"SprtArt"|"Social"); 
+
+/* Positions of PRICE variables
+   Provide labels of price variables (one label in each double-quote). Number of labels = number of alternatives.
+   Provide all UNO variables if there is no price variation */
+{ cprice,fp } = indices(dataset,"uno"|"uno"|"uno"|"uno"|"uno"|"uno");
+
+/* Definition of INDEPENDENT variables */
+
+/* Structural Equation Specification */
+let ivl1 = { FemDum 	zero	zero 	zero 	zero 	zero 	zero 	zero  		zero 	zero 	zero 		zero 	zero 	zero  		zero 	AgeDum4	AgeCDum2  	zero 		zero 		zero 		zero 	zero 		zero 		zero 	zero 		zero 	zero 	zero 		EduDum3 	EduDum4  zero 	 zero  	 zero 	zero 	 Prtner1 zero  		zero  	 zero     helOne helTwo  	zero 	zero 	zero 	zero 	zero 	zero 	zero 	zero 	lifeOne  lifeTwo  zero     zero     zero      zero  	zero    zero     zero    zero };
+let ivl2 = { zero 		FemDum  zero	zero	zero	midInc	highInc	VhighInc	zero	zero 	zero 		zero 	zero 	zero 		zero 	zero 	zero 		AgeDum3		AgeDum4  	AgeCDum2 	zero 	zero 		zero 		zero 	zero 		zero 	zero 	zero 		zero 		zero     EduDum4 zero  	 zero  	zero 	 zero 	 Prtner1  	zero  	 zero     zero   zero   	helOne 	helTwo 	zero 	zero 	zero 	zero 	zero 	zero 	zero   	 zero     lifeOne  lifeTwo  zero      zero 		zero    zero     zero    zero  };
+let ivl3 = { zero 		zero	FemDum	zero 	zero 	zero	zero	zero		midInc	highInc	VhighInc 	zero 	zero 	zero 		zero 	zero 	zero 		zero 		zero 		zero 		AgeDum3	AgeDum4  	AgeCDum2 	zero 	zero 		zero 	zero 	zero 		zero 		zero     zero 	 zero 	 zero 	zero 	 zero 	 zero 		Prtner1  zero     zero   zero 		zero 	zero 	helOne 	helTwo 	zero 	zero 	zero 	zero 	zero  	 zero     zero     zero     lifeOne   lifeTwo   zero    zero     zero    zero  };
+let ivl4 = { zero 		zero 	zero 	FemDum 	zero 	zero	zero	zero		zero	zero	zero 		midInc	highInc	VhighInc 	zero 	zero 	zero 		zero 		zero 		zero 		zero 	zero 		zero 		AgeDum4 AgeCDum2	zero 	zero 	zero 		zero 		zero     zero 	 EduDum2 EduDum3 EduDum4 zero 	 zero 		zero 	 zero     zero 	 zero  		zero 	zero 	zero 	zero 	helOne 	helTwo 	zero 	zero 	zero  	 zero  	  zero     zero     zero      zero  	lifeOne lifeTwo  zero    zero  };
+let ivl5 = { zero 		zero 	zero 	zero 	FemDum  zero	zero	zero		zero	zero	zero 		zero 	zero 	zero 		midInc	zero 	zero 		zero 		zero 		zero 		zero 	zero 		zero 		zero 	zero 		AgeDum3	AgeDum4 AgeCDum2 	zero 		zero     zero 	 zero 	 zero  	zero  	 zero    zero  		zero     UnEmpDum zero   zero  		zero 	zero 	zero 	zero 	zero 	zero 	helOne 	helTwo  zero     zero     zero     zero     zero      zero   	zero    zero  	 lifeOne lifeTwo  };
+
+
+
+{ p1,ivlt1 } = indices(dataset,ivl1');
+{ p2,ivlt2 } = indices(dataset,ivl2');
+{ p3,ivlt3 } = indices(dataset,ivl3');
+{ p4,ivlt4 } = indices(dataset,ivl4');
+{ p5,ivlt5 } = indices(dataset,ivl5');
+
+
+/* In the following specification, ivm1, ivm2, ivm3 contain independent variable specifications (on right hand side) for baseline utility (PSI) for alternatives 1, 2 and 3
+   Add a row for ivm4 below if there is a 4th alternative, another addiitonal row for ivm5 if there is a 5th alternative, ...  (number of rows = number of alternatives);
+   Number of columns = Number of variables including alternative specific constants; consider first alternative as base  */
+let	ivm1	=	{	uno 	zero 	zero 	zero 	zero	FemDum	zero  	zero 	 zero 	    AgeCDum1 	AgeCDum2 	zero  		zero  		zero  		zero 	zero 	zero  	zero 	 zero  	  zero  	highInc   VhighInc   zero  		zero 	 	zero 		zero   zero   		zero   		zero  		hhchild1    zero  		zero  		zero      zero     saturday      zero 	 	zero  	  zero  	zero  	  grpProb    zero    zero  	 zero  	zero   };
+let	ivm2	=	{	zero 	zero 	zero 	zero 	zero 	zero	zero  	zero 	 zero 		zero 		zero 		zero  		zero  		zero  		zero 	zero 	zero  	zero 	 zero 	  zero  	zero    	zero     zero   	zero  		zero		zero   zero   		zero   		zero    	zero     	 zero  		zero     	zero      zero  	 zero  	     zero  	  	zero      zero       zero  	  zero  	zero     zero    zero  zero };
+let	ivm3	=	{	zero 	uno 	zero 	zero 	zero 	zero	zero  	zero 	 zero 		zero 		zero 		AgeCDum1 	AgeCDum2  	zero  		stdnt 	EmpDum  zero  	zero 	 zero     zero  	zero 		zero   	 highInc   	VhighInc  	zero		zero   zero   		zero   		zero    	zero  	  	 zero  		zero     	zero      zero   	 zero  	     saturday  	zero  	  zero      zero       zero  	grpProb zero     zero 	 zero };
+let	ivm4	=	{	zero  	zero 	uno 	zero 	zero 	zero	FemDum  zero 	 zero 		zero 		zero 		zero  		zero  		zero  		zero 	zero 	EmpDum  zero 	 zero     metroN    zero    	zero     zero   	zero  		VhighInc	zero   zero   		zero   		zero    	zero        hhchild1   hhchild3  	zero      zero   	 zero        zero  		saturday  zero      zero       zero  	zero  	grpProb  zero    zero  };
+let	ivm5	=	{	zero 	zero 	zero 	uno 	zero 	zero	zero  	FemDum 	 zero 		zero 		zero 		zero  		zero  		AgeCDum1 	zero 	zero 	zero  	EmpDum   zero     zero  	zero    	zero     zero 		zero 		zero		midInc VhighInc   	zero   		Prtner1 	zero        zero   		zero      	hhchild1  zero   	 zero        zero  		zero  	  saturday  zero       zero  	zero  	zero     grpProb zero  };
+let	ivm6	=	{	zero 	zero 	zero 	zero 	uno 	zero	zero  	zero 	 FemDum 	zero 		zero 		zero  		zero  		zero  		zero	zero	zero 	zero  	 EmpDum   zero  	zero    	zero     zero   	zero    	zero		zero   zero   		VhighInc    zero    	zero        zero   		zero      	zero      hhchild3   zero        zero  		zero      zero      saturday   zero  	zero  	zero     zero    grpProb  };
+
+
+//Add a row for v4 below if there is a 4th alternative, another additional row for v5 if there is a 5th alternative,.... (number of rows = number of alternatives)
+{ v1,ivmt1 }   = indices(dataset,ivm1');
+{ v2,ivmt2 }   = indices(dataset,ivm2');
+{ v3,ivmt3 }   = indices(dataset,ivm3');
+{ v4,ivmt4 }   = indices(dataset,ivm4');
+{ v5,ivmt5 }   = indices(dataset,ivm5');
+{ v6,ivmt6 }   = indices(dataset,ivm6');
+
+/* Define labels of the parameters in the baseline utility for output printing;
+   Provide as many parameter labels as the number of columns in ivm1 (i.e., the number of variables in the Psi function) */
+varnam =  "const1"|"const3"|"const4"|"const5"|"const6"|"Fem1"|"Fem4"|"Fem5"|"Fem6"|"AgeY1"|"AgeO1"|"AgeY3"|"AgeO3"|"AgeY5"|
+"Student3"|"Emp3"|"Emp4"|"Emp5"|"Emp6"|"NMetro4"|
+"hInc1"|"vhiInc1"|"hInc3"|"vhiInc3"|"vhiInc4"|"midInc5"|"vhiInc5"|"vhiInc6"|
+"Prtner5"|
+"child11"|"child14"|"child34"|"child25"|"child36"|
+"Sat1"|"Sat3"|"Sat4"|"Sat5"|"Sat6"|"Prob1"|"Prob3"|"Prob4"|"Prob5"|"Prob6";
+										
+/* In the following specification, ivd1, ivd2, ivd3 contain input data specifications (on right hand side) for satiation parameters (Alphas) for alternatives 1, 2 and 3
+   Add a row below for ivd4 if there is a 4th alternative, another additional row for ivd5 if there is a 5th alternative,.... (number of rows = number of alternatives)
+   Number of columns = Number of alternatives.
+   Note that you can also add individual-specific variables below, so that satiation varies across individuals; However, you will then have to translate outputs to compute actual alpha parameters.
+   This code is written to provide you with the alpha parameters directly for the case when there is no variation in alpha across individuals */
+let	ivd1	=	{	uno 	zero	zero	zero	zero 	zero 	};
+let	ivd2	=	{	zero	uno 	zero	zero	zero 	zero 	};
+let	ivd3	=	{	zero	zero	uno 	zero	zero 	zero 	};
+let	ivd4	=	{	zero	zero	zero	uno	    zero 	zero 	};
+let	ivd5	=	{	zero	zero	zero	zero	uno	 	zero    };
+let	ivd6	=	{	zero	zero	zero	zero	zero	uno    };
+
+
+/*Alpha = 1-exp(Delta) if Alpha < 1
+Alpha = 1-(1/(1+exp(Delta))) if 0 < Alpha < 1   */
+
+//Add a row for w4 below if there is a 4th alternative,..... (number of rows = number of alternatives)
+{ w1,ivdt1 }   = indices(dataset,ivd1');
+{ w2,ivdt2 }   = indices(dataset,ivd2');
+{ w3,ivdt3 }   = indices(dataset,ivd3');
+{ w4,ivdt4 }   = indices(dataset,ivd4');
+{ w5,ivdt5 }   = indices(dataset,ivd5');
+{ w6,ivdt6 }   = indices(dataset,ivd6');
+
+
+let	ivg1	=	{	uno 	zero	zero	zero	zero 	zero 	FemDum 	zero	zero	zero	AgeCDum1 	zero 		zero    	zero   	  highInc   VhighInc    zero  	zero  	 zero  		zero  	zero };
+let	ivg2	=	{	zero	uno 	zero	zero	zero    zero 	zero 	zero	zero	zero	zero 		zero 		zero 		zero  	  zero   	zero  		midInc  highInc  VhighInc  	zero  	zero } ;
+let	ivg3	=	{	zero	zero	uno 	zero	zero 	zero 	zero 	FemDum	zero	zero	zero 		zero 		zero    	zero  	  zero 		zero		zero   	zero  	 zero  		midInc  zero };
+let	ivg4	=	{	zero	zero	zero	uno	    zero 	zero 	zero 	zero	FemDum	zero	zero 		AgeCDum1 	zero    	zero  	  zero   	zero 		zero 	zero	 zero  		zero    VhighInc };
+let	ivg5	=	{	zero	zero	zero	zero	uno	 	zero 	zero 	zero	zero	zero	zero 		zero 		zero    	zero  	  zero   	zero 		zero   	zero  	 zero 		zero  	zero };
+let	ivg6	=	{	zero	zero	zero	zero	zero	uno 	zero 	zero	zero	FemDum	zero 		zero 		AgeCDum1    AgeCDum2  zero   	zero 		zero   	zero  	 zero  		zero  	zero };
+
+
+{ u1,ivgt1 }   = indices(dataset,ivg1');
+{ u2,ivgt2 }   = indices(dataset,ivg2');
+{ u3,ivgt3 }   = indices(dataset,ivg3');
+{ u4,ivgt4 }   = indices(dataset,ivg4');
+{ u5,ivgt5 }   = indices(dataset,ivg5');
+{ u6,ivgt6 }   = indices(dataset,ivg6');
+
+
+ivl = ivlt1'~ivlt2'~ivlt3'~ivlt4'~ivlt5';			//A row containing the name of the data columns going into the structural equation of the latent variable
+ivgenyc = ContInd';     //A row containing the names of the continuous indicators
+ivgenyo = OrdInd';		//A row containing the column number sof ordinal indicators
+ivm = ivmt1'~ivmt2'~ivmt3'~ivmt4'~ivmt5'~ivmt6'; // can append more: e.g. ~ivmt4'~ivmt5' and so on, based on the number of alternatives
+ivd = ivdt1'~ivdt2'~ivdt3'~ivdt4'~ivdt5'~ivdt6'; // can append more: e.g. ~ivdt4'~ivdt5' and so on, based on the number of alternatives
+ivg = ivgt1'~ivgt2'~ivgt3'~ivgt4'~ivgt5'~ivgt6'; // can append more: e.g. ~ivgt4'~ivgt5' and so on, based on the number of alternatives
+
+nvarml = cols(ivl1);	//Number of parameters in the structural equation of the latent variable
+nvarm = cols(ivm1);     // number of variables in baseline utility   = number of columns in ivm1, do not modify this
+nvardel = cols(ivd1);   // number of variables in satiation          = number of columns in ivd1, do not modify this
+nvargam = cols(ivg1);   // number of variables in translation        = number of columns in ivg1, do not modify this
+
+
+// Associating columns with variable names
+flagchm = f';
+
+// Availability of alternatives
+{avbl1,avb1indx} = indices(dataset,"uno");
+{avbl2,avb2indx} = indices(dataset,"uno");
+{avbl3,avb3indx} = indices(dataset,"uno");
+{avbl4,avb4indx} = indices(dataset,"uno");
+{avbl5,avb5indx} = indices(dataset,"uno");
+{avbl6,avb6indx} = indices(dataset,"uno");
+
+
+flagavm = avb1indx ~ avb2indx ~ avb3indx ~ avb4indx ~ avb5indx~avb6indx;  // can append more: e.g. ~avb4indx ~avb5indx and so on, based on the number of alternatives
+flagprcm = fp';
+
+/******************************************************************************
+             Covariance Matrix
+******************************************************************************/
+/* The code computes the elements of the cholesky decomposition of the difference of error terms 
+(see discussion on Page 12 of Bhat et al., 2012) */
+ nCholOmega1 = (nvar_mear*(nvar_mear+1))/2; 		@Calculates how many parameters in the lower trig mat. of Ch. Fac. of psi@
+ nCholOmega = (nvar_latent*(nvar_latent+1))/2; 	@Calculates how many parameters in the lower trig mat. of Ch. Fac. of Latent variable@
+ ncov = nc*(nc+1)/2;			// Number of elements of the covariance matrix
+
+/******************************************************************************
+                          Starting values
+******************************************************************************/
+ Alpha = 0.1752|	0.0819|	0.0776|	0.2591|	0.3256| @Female Dummies@
+	-0.2318|	-0.181|	-0.2855|	-0.2117|	-0.1769|	-0.2037|	-0.1266|	-0.1455|	-0.1643|	-0.0738| @Income dummies@
+	0.1302|	0.22|	0.2737|	0.4189|	0.3756|	0.1883|	0.2203|	0.173|	-0.2851|	-0.3921|	-0.0927|	-0.2442|	-0.443| @Age Dummies@
+	-0.2035|	-0.4338|	-0.1116|	0.1266|	0.2117|	0.3419| @Education indicators@
+	0.2112|	-0.0613|	-0.1395|@Spouse indicator@
+	-0.2004|@UnEmployment dummy@
+	0.6761|	0.4756|	-1.5195|	-1.0868|	-1.0167|	-0.7817|	-0.8889|	-0.6892|	-1.0393|	-0.7895| @health problem indicator Indicator@
+	-1.2577|	-0.6469|	0.6298|	0.2595|	1.2651|	0.4905|	1.2447|	0.5316|	0.962|	0.3195; @life quality indicator@
+ 
+ Beta_corr = { 1	-0.1423		-0.413		-0.5235		-0.2658,
+			-0.1423	0.999953	0.381049	0.5591		0.456509,
+			-0.413	0.381049	1.0001		0.951646	0.455901,
+			-0.5235	0.5591		0.951646	0.999983	0.58022,
+			-0.2658	0.456509	0.455901	0.58022		1 }; @The covariance matrix of the latent variable@
+			
+ Beta_corr1_pass = (chol(Beta_corr))'; 	@chol() returns the upper triangle of Chl. decom. of Beta_corr with bottom of the matrix filled with zero@
+ Beta_corr1_pass1 = Beta_corr1_pass;			@Upmat takes the upper triangle and transpose is to make it a lower triangular matrix@
+
+Beta_corr_active = { 	0 	1 	1  1 	1,
+						1	0 	1  1	1,
+						1	1	0  1	1,
+						1   1   1  0    1,
+						1	1 	1  1	0 }; 	
+						
+
+ 
+ @This matrix makes the non-diagonal elements of the cholesky decomposed matrix to be sqrt((a^2)/(1-a^2))@
+ @Or in other words the cholesky factor would be: sqrt(x^2/(1+x^2))@
+ @CHANGED TO THE RECENT VERSION@
+ for i(2,rows(Beta_corr),1);
+	for j(1,i,1);
+		if (i ne j AND Beta_corr_active[i,j]);
+			temp = sumc(Beta_corr1_pass1[i,1:i-1]'.*Beta_corr1_pass1[i,1:i-1]');
+			Beta_corr1_pass[i,j] = Beta_corr1_pass1[i,j]/sqrt(1-temp);
+		endif;
+	endfor;
+endfor;
+
+ Chol_Corr_Map = {	1	0  0	0	0,	@Correlation of latent variable@
+					2	3  0	0	0,
+					4	5	6	0	0,
+					7	8	9	10	0,
+					11	12	13	14	15 }; 
+  
+  delta = 4.1301|	3.9918|	3.9825|	2.2396|	2.2789|	2.2377|	1.1979|	1.1703|	1.139|	1.7212|	1.6421|	1.5033|	2.7917|	3.0345|	3.4088; @Constants in the measurement equations of the latent variable@ @Number = number of indicators@	  
+  d_matrix = 0.8976|	0|	0|	0|	0|
+			1.0443|	0|	0|	0|	0|
+			1.0301|	0|	0|	0|	0|
+			0|	1.2135|	0|	0|	0|
+			0|	1.3051|	0|	0|	0|
+			0|	1.2245|	0|	0|	0|
+			0|	0|	0.8683|	0|	0|
+			0|	0|	0.8806|	0|	0|
+			0|	0|	0.8508|	0|	0|
+			0|	0|	0|	1.0924|	0|
+			0|	0|	0|	1.1527|	0|
+			0|	0|	0|	1.0362|	0|
+			0|	0|	0|	0|	1.2029|
+			0|	0|	0|	0|	1.4855|
+			0|	0|	0|	0|	1.2986;
+
+  @Note: The _max_active for d_matrix is set in a way so that, the factor loading is estimated only when the initial parameter value is greater than zero@
+  //PsiDiag = 1.1221|	1.0867|	1.0956|	0.865|	0.5868|	0.8393|	0.8941|	0.8015|	0.8262|	1.1463|	1.0165|	1.0889|	1.3189|	0.9506|	1.4166;
+  PsiDiag = ones(nvar_mear_cont,1);
+  //Psi = diagrv(Psi,PsiDiag);
+  Psi   = PsiDiag; 		@Will be only be providing the nvar_mear_cont diagonal elements @	
+
+  /*****Veector of structural equation model parameters******/
+  bb2 = Alpha|vech(Beta_corr1_pass)|delta|d_matrix|Psi;@Beta_corr1_pass must be lower triangular matrix@ @Psi is a vector of size nvar_mear_cont@
+  print "beta_corr1_pass: " vech(Beta_corr1_pass);
+  
+  /******Active parameter setting for structural equation model**********/
+ D_matrix_active = (d_matrix .> 0);
+ 	
+ Psi_active = zeros(nvar_mear_cont,1);
+ 				
+ _max_active = ones(nvarml,1)| 			@First block is for the parameters going into the structural eq. of lt. var.@
+			   vech(Beta_corr_active)|					@This block is for the error correlation of the latent variable@
+			   ones(nvar_mear,1)|		@For means of the measurement equation@
+			   D_matrix_active|			@For factor loadings, already defined previously@
+			   Psi_active;				@For measurement equation error correlation, already defined previously@
+ 
+/* Below is the code for defining EQMATDEL and EQMATGAM matrices; 
+   These definitions correspond to restricted estimations of the alpha and gamma parameters across alternatives based on the configuration specified (see documentation) */
+ if _config==1; //Estimates alpha parameters, gamma parameters are fixed to one
+   EQMATDEL = eye(nvardel);
+   EQMATGAM = ones(1,nc);
+   Lambda = 0|0.0|
+			1|1.5|	
+			1|1.5|
+			1|1.5|
+			1|1.5; @Coefficient of the latent into the baseline utility@
+   
+   LambdaAct = 0|0|
+			   1|1|	
+			   1|1|
+			   1|1|
+			   1|1;
+   bb = 0.5|-1.0|1.0|-1.0|-0.5;@nvarm@
+   bb = bb|Lambda; @concatenating lambda@
+   bb = bb|2.005945|	1.215149|	-1.407263|	2.11806|	1.399598|	1.913189|zeros(rows(eqmatgam),1); @concatenating alpha@
+   _max_active = _max_active|ones(nvarm,1)|LambdaAct|zeros(rows(eqmatdel),1)|ones(rows(eqmatgam),1);
+   //_max_active = _max_active|zeros(nvarm,1)|LambdaAct|zeros(rows(eqmatdel),1)|zeros(rows(eqmatgam),1);
+ elseif _config==4; //Estimates gamma parameters, alpha paramters are fixed to zero
+   EQMATDEL = ones(1,nc);
+   EQMATGAM = eye(nvargam);
+   Lambda = -0.0553|	-0.0617|	-0.0719|	0.1042|	-0.062|
+			0|	0|	0|	0|	0|
+			0.1206|	-0.0816|	0.0152|	0.045|	0.0344|
+			0.0047|	-0.0285|	-0.2616|	0.3489|	-0.1014|
+			0.127|	-0.1211|	-0.2304|	0.3428|	-0.0164|
+			0.1|	-0.0461|	-0.1064|	0.2052|	-0.0324; @Coefficient of the latent into the baseline utility@
+   
+   LambdaAct = 	1.0|1.0|1.0|1.0|1.0|
+				0.0|0.0|0.0|0.0|0.0|
+				1.0|1.0|1.0|1.0|1.0|
+				1.0|1.0|1.0|1.0|1.0|
+				1.0|1.0|1.0|1.0|1.0|
+				1.0|1.0|1.0|1.0|1.0; 
+   bb = -1.3982|	-1.8928|	-1.8365|	-2.7911|	-1.1808|@Constants@
+	0.3482|	0.2196|	0.1649|	0.3633| @Female Dummy@
+	0.1414|	0.2897|	0.1097|	-0.1643|	0.172|	@AgeDummy@
+	0.284| @Student dummy@
+	0.0949|	0.232|	0.2368|	0.1252|@Employed dummy@
+	-0.156|	@Not metropolitan dummy@
+	0.174|	0.4003|	0.1619|	0.4404|	0.1984|	0.1121|	0.3306|	0.0884|@Income dummies@
+	0.1367| @Presence of partner dummy@
+	0.2332|	0.0806|	0.1331|	-0.2674|	0.0908|@Age of youngest hh child dummy@
+	0.0674|	0.1057|	0.263|	0.3241|	0.0535|@Saturday indicator@
+	-0.1516|	-0.4122|	-0.4241|	-0.2501|	-0.3047|@Physical problem indicator@
+	Lambda|-1000*ones(rows(EQMATDEL),1)|
+	5.1127|	5.2547|	5.4617|	4.4021|	7.6058|	5.3356|@Gamma constants@
+	-0.1815|	-0.4968|	0.2196|	-0.1942|@Gender dummies@
+	0.2379|	0.1693|	0.2798|	-0.3583|@Age dummeis@
+	-0.1942|	-0.388|	-0.2631|	-0.1997|	-0.2989|	0.3001|	0.144 @Income dummies@;
+   _max_active = _max_active|ones(nvarm,1)|LambdaAct|zeros(rows(eqmatdel),1)|ones(rows(eqmatgam),1);
+ elseif _config==7;
+   EQMATDEL = ones(1,nc);
+   EQMATGAM = eye(nc);
+   Lambda = zeros(nc*nvar_latent,1);
+   LambdaAct = 1|1|0|1|1|1|
+			   1|1|0|1|1|1;
+   bb = -2.9882|	-1.9595|	-3.3865|	-2.9406|	-2.9755|-0.1616|	-0.0064|	0.1014|	-0.2786|	-0.249;@nvarm@
+   bb = bb|Lambda; @concatenating lambda@
+   bb = bb|-1000*ones(rows(EQMATDEL),1)|zeros(rows(EQMATGAM),1);
+   _max_active = _max_active|ones(nvarm,1)|LambdaAct|zeros(rows(eqmatdel),1)|zeros(rows(eqmatgam),1);
+ endif;
+
+bcov0 =  { 1.0 		0.0   	0.0  	0.0   	0.0  	0.0,
+		   0.0  	0.7358   0.0  	0.0   	0.0  	0.0,
+		   0.192  	0.0   	0.910  	0.0   	0.0  	0.0,
+		   0.0  	0.0   	0.0  	0.929   0.0  	0.0,
+		   0.153  	0.0   	0.0  	0.0   	0.5368  0.0,
+		   0.1432  	0.0   	0.0  	0.0   	0.0  	0.714 };  
+
+bcov = vech(upmat(bcov0)');
+	
+//You can estimate the variance-covariance matrix of the error difference
+//Even for that you have to fix the top left element if there is no price variation
+if _cholk == 1;
+  if _price == 1;
+    _max_cov = { 1.00 0.00 0.00 0.00,
+				 0.00 1.00 0.00 0.00,
+				 0.00 0.00 1.00 1.00,
+				 0.00 0.00 1.00 1.00 };  
+  else;	
+	_max_cov = 0|
+			   0|0|
+			   1|0|1|
+			   0|0|0|1|
+			   1|0|0|0|1|
+			   1|0|0|0|0|1;
+  endif; 
+else;
+  _max_cov = zeros(ncov,1);  
+endif;	
+
+//The serial of the coefficients, the mean beta, then the alpha parameters, then the gamma parameters
+//Followed by the st.dev. of the betas, then the cholesky factor of the error term,
+b = bb2|bb|bcov;			// You can also provide your own starting values
+_max_active = _max_active|_max_cov;
+
+/* Defining variable labels in satiation and translation parameter terms, random coefficients, and coraviance parameters for output printing */
+Alpha_nam         =  0 $+ "Alpha" $+ ftocv(seqa(1,1,nvarml),2,0);
+Beta_corr_nam     =  0 $+ "Tild" $+ ftocv(seqa(1,1,nCholOmega),2,0);
+delta_nam         =  0 $+ "Delta" $+ ftocv(seqa(1,1,nvar_mear),2,0);
+d_matrix_nam      =  0 $+ "D_caP" $+ ftocv(seqa(1,1,nvar_latent*nvar_mear),2,0);
+Psi_nam           =  0 $+ "Psi" $+ ftocv(seqa(1,1,nvar_mear_cont),2,0);
+varLmbda = 0 $+ "Lambda" $+ ftocv(seqa(1,1,nc*nvar_latent),2,0);
+varndell = 0 $+ "D" $+ ftocv(seqa(1,1,rows(eqmatdel)),2,0);
+varngam  = 0 $+ "G" $+ ftocv(seqa(1,1,rows(eqmatgam)),2,0);
+varcov   = 0 $+ "chol"   $+ ftocv(seqa(1,1,ncov),2,0);
+
+
+/******************************************************************************
+Other Maxlik globals */
+_max_ParNames = Alpha_nam|Beta_corr_nam|delta_nam|d_matrix_nam|Psi_nam|varnam|varLmbda|varndell|varngam|varcov;     // Appending all the parameter (or coefficient) names            
+_max_Options = { bfgs stepbt };
+_max_gradTol = 5e-5; 
+//_max_GradCheckTol = 1e-6;
+
+
+print "how many active parameters: " sumc(_max_active);
+
+ final_result = {};
+ count = 1;
+ 
+ 		dataset1 = dataMat[.,.]; 
+		_max_Maxiters = 100000;
+		_max_GradProc = &lgdnorm;
+		_max_CovPar = 2;        										 // modify according to the type of standard errors you need	
+		//start = timestr(0);
+		//call lgdnorm(b, dataset1);
+		//endt = timestr(0);
+		//ll = lprnorm(b, dataset1);
+		//_max_GradCheckTol = 1e-10;
+		
+		print "b: " b';
+		//call lgdnorm(b,dataset1);
+		/*start = timestr(0);
+		{ x,f,g,cov,retcode } = maxprt(maxlik(dataset1,0,&lprnorm,b));
+		endt = timestr(0);
+		
+		@CORRECTED CONVERSION OF THE ALPHA CORRELATION PARAMETERS@
+		Beta_corr1       = (upmat(xpnd(x[nvarml+1:nvarml+nCholOmega])))';
+		Beta_corr2       = Beta_corr1; @Beta_corr1 and Beta_corr2 are lower triangular matrices@
+		for m(2,rows(Beta_corr1),1);
+			for n(1,m,1);
+				if (m ne n AND Beta_corr_active[m,n]);
+					temp = sumc(Beta_corr2[m,1:m-1]'.*Beta_corr2[m,1:m-1]'); @Changed from beta_corr2 to Beta_corr1@
+					Beta_corr1[m,n] = Beta_corr2[m,n]/sqrt(1+temp); @Its just getting back the elements of the lower triangle of the cholesky decomposed matrix@
+					clear temp;	
+				endif;
+				
+				if (m eq n);
+					temp = sumc(Beta_corr2[m,1:m-1]'.*Beta_corr2[m,1:m-1]'); @Changed from beta_corr2 to Beta_corr1@
+					Beta_corr1[m,n] = 1/sqrt(1+temp);
+					//Beta_corr1[m,n] = sqrt(1-temp);
+					clear temp;
+				endif;
+			endfor;
+		endfor;
+		Beta_corr1 = Beta_corr1*Beta_corr1';
+
+		bb1 = x[1:nvarml];
+		bb1 = bb1|vech(chol(Beta_corr1)')|x[nvarml+ncholOmega+1:rows(x)];
+		
+		_max_Maxiters = 0;
+		_max_GradProc = &lgdnorm1;
+		_max_CovPar = 3;
+		//_max_GradCheckTol = 1e-6;
+		start2 = timestr(0);
+		{ x,f,g,cov,retcode } = maxprt(maxlik(dataset1,0,&lprnorm1,bb1));
+		endt2 = timestr(0);
+		print "starttime 1: " start;
+		print "endtime 1: " endt;
+		print "starttime 2: " start2;
+		print "endtime 2: " endt2;*/
+		
+/******************************************************************************
+                          Procedure definitions begin: MDCMP
+******************************************************************************/
+proc lprnorm(x,dta);
+ local wt,xbase, xdel,xsigm,xsigmm,xgam,xsd,xcov,v2,w2,u2,j,k, v,vv, Vf,w,u,a,f,b,m,mq,cqq,cq,sel,Jac,e,d, ww1;
+ local covb,covn,ident,min1,p4,seedn,sq,app1,hj,zj,covj,corrj,p1,p2,p2_temp, ch,nch,mear_ch, ha,hb,mu,mu_final,omegacov,omegacorr,z1,count, dummy;
+ local Alpha_coeff, Chol_Alpha_corr, delta_coeff, d_matrix_coeff, Psi_chol, Lambda_coeff, Lambda, Alpha_corr, D_matrix, Psi_matrix, AlphaW, z,y;
+ local U_Y, Full_error, e1, e12, e21, e22,  Mmat, UY_Tild, Error_Tild, mean_one, err_one_var, mean_one_obs, mean_two, err_two_var, cov_one_two, mean_two_changed, err_two_changed, mean_two_final, err_two_varf, err_two_corrf, err_two_final; 
+ local lower_threshold,upper_threshold, lower_threshold_matrix, upper_threshold_matrix, lower_threshold_mat, upper_threshold_mat;
+ local g1,g2, rho_low_g1, rho_low_g2, rho_up_g1, rho_up_g2, corr_g1g2, S, mean_nc, var_nc, st_err_nc, mean_nc_final, corr_nc, SS;
+ local p3, p3_temp, p3_temp_low, p3_temp_up, rho_low_g3, rho_up_g3, g3, lower_threshold_append, upper_threshold_append, mear_nch;
+ local mean_ordl_nc, var_ordl_nc, st_err_ordl_nc, mean_low_final, mean_up_final, corr_ordl_nc, Chol_alpha_corr_adjusted, Chol_alpha_corr_adjusted1, temp;
+ local p3_temp1, p3_temp2, iden_matrix, one_negative, ncDiff, MBig, im;
+ local err_one_var_inv, mean_one_i, mean_one_obs_i, err_one_var_i, mean_nc_i, corr_nc_i, Error_Tild_i;
+ local mean_two_i, err_two_var_i, cov_one_two_i, mean_two_final_i, err_two_final_i, U_Y1, errDiff, err_one_var_inv_i;
+
+
+	Alpha_coeff        =  x[1:nvarml]; @structural equation parameters@
+	Chol_Alpha_corr    =  upmat(xpnd(x[nvarml+1:nvarml+nCholOmega])); @Creates a matrix@
+	delta_coeff        =  x[nvarml+nCholOmega+1:nvarml+nCholOmega+nvar_mear]; @Means of measurement equation@
+	d_matrix_coeff     =  x[nvarml+nCholOmega+nvar_mear+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear]; @Factor loadings@
+	Psi_chol           =  diagrv(eye(nvar_mear_cont),(x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont])); @ms eq. error corr.@
+	xbase 			   = x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm]; //Baseline utility parameters
+	Lambda_coeff 	   = x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent]; //Latent variable coefficient into the baseline utility
+	xdel  			   = eqmatdel'*x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent+rows(eqmatdel)]; //Converts the no. of alpha parameters to be estimated to the total no. of alternatives, nc
+	xgam  			   = eqmatgam'*x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent+rows(eqmatdel)+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)];//same as above
+	xcov  				= upmat(xpnd(x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)+1:rows(x)])); //Get the cholesky factors
+
+	Chol_Alpha_corr_adjusted = Chol_Alpha_corr';
+	Chol_Alpha_corr_adjusted1 = Chol_Alpha_corr';
+		
+	@Why doing this?@
+	for i(2,rows(Beta_corr),1);
+		for j(1,i,1);
+			if (i ne j);
+				temp = sumc(Chol_Alpha_corr_adjusted1[i,1:i-1]'.*Chol_Alpha_corr_adjusted1[i,1:i-1]');
+				Chol_Alpha_corr_adjusted[i,j] = Chol_Alpha_corr_adjusted1[i,j]/sqrt(1+temp);
+				clear temp;
+			endif;
+				
+			if (i eq j);
+				temp = sumc(Chol_Alpha_corr_adjusted1[i,1:i-1]'.*Chol_Alpha_corr_adjusted1[i,1:i-1]');
+				Chol_Alpha_corr_adjusted[i,j] = 1/sqrt(1+temp);
+				clear temp;
+			endif;
+		endfor;
+	endfor;
+	   
+	Chol_Alpha_corr = Chol_Alpha_corr_adjusted';
+
+ Alpha_corr = Chol_Alpha_corr' * Chol_Alpha_corr; //Get the variance-covariance matrix of the latent variable
+ D_matrix   = reshape(d_matrix_coeff,nvar_mear, nvar_latent); //reshape the factor loadings in nvar_mear x nvar_latent format
+ Psi_matrix = Psi_chol' * Psi_chol; //Get the variance-covariance matrix of the indicators
+ Lambda 	= reshape(Lambda_coeff, nc, nvar_latent); //  Reshape the Lambda_coeff into nc by nvar_latent format
+ covn = xcov'*xcov; //xcov is a upper triangular matrix
+ 
+
+ AlphaW = (ones(nvar_latent,1) .*. Alpha_coeff  )*~(dta[.,ivl])';
+ z = {}; j = 1;	
+ do until j > nvar_latent;
+	z = z~(sumc(AlphaW[(j-1)*nvarml+1:(j*nvarml),.]));                // Z stores the latent variables value for each observation. nobs X nvar_latent. 1st col has z1, 2nd z2 and so on for all observations.
+    j = j+1;
+endo;
+  
+ @For each measurement equation, factor loading gets mult. by teh latent variable and summed up@
+ y = ((D_matrix * z') + delta_coeff)'; // Y stores the Y variables value for each observation. nobs X nvar_mear. 1st col has Y1, 2nd Y2 and so on for all observations.
+
+//multiply the variables with the appropriate betas for all the alternatives
+ v2 = (ones(nc,1) .*. xbase)*~(dta[.,ivm])';
+ w2 = (ones(nc,1) .*. xdel)*~(dta[.,ivd])'; //For alpha
+ u2 = (ones(nc,1) .*. xgam)*~(dta[.,ivg])'; //For gamma
+
+//Sum the deterministic portion of the utility, alpha and gamma
+ j=1;
+ v = {};
+ w = {};
+ u = {};
+ do until j == nc+1;
+   v = v~(sumc(v2[(j-1)*nvarm+1:(j*nvarm),.]));			// beta*zeta deterministic
+   w = w~(sumc(w2[(j-1)*nvardel+1:(j*nvardel),.]));		// alpha
+   u = u~(sumc(u2[(j-1)*nvargam+1:(j*nvargam),.]));		// gamma
+   j = j+1;
+ endo;
+ //At the end of the loop, v, w and u are nobs x nc matrices
+
+ vv = v + (Lambda * z')'; //Add latent variable into the baseline utility
+ 
+ clear v2,w2,u2;
+ 
+ @Convertion of alpha parameter@
+ a = exp(w);		
+ if _alp0to1;
+   a = 1/(1+exp(w)); 		// a is 1-alpha
+ endif;
+ 
+ @Conversion of gamma parameter@
+ f = exp(u);				// gamma
+ b = dta[.,flagchm] .> 0;	// 1 if chosen, 0 if not //A nobs x nc matrix
+ m = sumc(b');				// number of chosen alternatives  //an nobs x 1 column vector
+ 
+ // Identifying alternative mq
+ mq = b.* (seqa(1,1,nc))'; //Convert the 1's into the serial number of the alternatives
+ mq = substute(mq,b.==0,nc+1); //Give a number greater than the total number of alternatives to the unchosen alternatives
+ mq = minc(mq'); //Select the id of the first chosen alternative //mq is a nobs x 1 column vector
+ 
+ //All the matrices in this equation are nobs x nc, must require the use of dot operator
+ Vf = vv-a.*ln((dta[.,flagchm]+f)./f)-ln(dta[.,flagprcm]);	// deterministic component V //An nobs by nc matrix
+
+ //Taking differences w/r to alternative mq
+ cqq = reshape(((seqa(1,1,nc).*.ones(1,nobs)))', nobs*nc, 1 ); //cqq is a column of the seq of alternative numbers repeated nobs times
+ cq = reshape(b, nobs*nc, 1 ); //Convert b into a column, where the seq is the participation indicator for 1st obs then for second observation and so on
+ sel = cqq.*(cqq .!= (mq.*.ones(nc,1)));
+ cq = reshape(selif(cq, cqq .== sel), nobs, nc-1); //cq is b arranged an nobs x (nc- 1) matrix//alternatives are 1 0 with 1 for selected and 0 for non-selected
+ 
+ //Jacobian computation - not dividing by the price of mq, 
+ //Correct if no price variation - need to correct if there is price variation
+ Jac = (a.*b)./((dta[.,flagchm]+f));
+ Jac = Jac./(dta[.,flagprcm]); 
+ Jac = substute(Jac,b.==0,1); //
+ e = (1/Jac).*b;  //nobs x nc matrix
+ d = sumc((e'));//nobs x 1, the summation portion of the Jacobian
+ Jac = (prodc((Jac'))).*d; //An nobs by 1 matrix
+ 
+ U_Y = (y'|Vf')'; //concatenating the continuous indicator and the deterministinc portion of the utility
+ e1   = ( D_matrix * Alpha_corr * D_matrix' + Psi_matrix ); @An nvar_mear x nvar_mear matrix@
+ e12  = ( D_matrix * Alpha_corr * Lambda'); @nvar_mear x nc matrix@
+ e21  = ( Lambda * Alpha_corr * D_matrix'); @nc x nvar_mar matrix@
+ e22  = ( Lambda * Alpha_corr * Lambda' + covn); @nc x nc matrix@
+ 	   
+ @Full error is a (nvar_mear + nc) x (nvar_mear + nc) matrix@
+ Full_error = (e1~e12);
+ Full_error = Full_error | (e21~e22);
+  
+//Next two code blocks create the M matrix
+ MBig = zeros((nvar_mear+nc-1)*nc,(nvar_mear+nc));
+ iden_matrix = eye(nc-1);
+ one_negative = -ones(nc-1,1);
+ ncDiff = nc-1;
+   
+  for im(1,nc,1);
+	if(im eq 1);
+		Mmat = one_negative ~ iden_matrix; @First column is filled up by -1, the rest of the matrix is filled up by (nc-1) identity matrix@
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+1:((im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont),1:nvar_mear_cont] =eye(nvar_mear_cont);
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont+1:im*(nvar_mear_cont+ncDiff),nvar_mear_cont+1:nvar_mear_cont+nc] = Mmat;
+		clear Mmat;
+	elseif(im eq nc);
+		Mmat = iden_matrix ~ one_negative;	@Last column is filled up by -1, the rest of the matrix is filled up by (nc-1) identity matrix@
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+1:((im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont),1:nvar_mear_cont] =eye(nvar_mear_cont);
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont+1:im*(nvar_mear_cont+ncDiff),nvar_mear_cont+1:nvar_mear_cont+nc] = Mmat;
+		clear Mmat;
+	else;
+		Mmat = iden_matrix[.,1:im-1] ~ one_negative ~ iden_matrix[.,im:nc-1]; @Choice column filled up by -1@
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+1:((im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont),1:nvar_mear_cont] =eye(nvar_mear_cont);
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont+1:im*(nvar_mear_cont+ncDiff),nvar_mear_cont+1:nvar_mear_cont+nc] = Mmat;
+		clear Mmat;
+	endif;
+endfor;
+ @MBig has been checked for correctness@
+ 
+ @NEXT CREATE hj, covj, corrj, om - ALL OF THESE WILL VARY BY WHICH ALTERNATIVE IS CHOSEN@
+ UY_Tild = zeros(nobs,(nvar_mear_cont+nc-1)); @This will hold the differenced mean@
+ Error_Tild = zeros((nvar_mear_cont+nc-1)*(nc),(nvar_mear_cont+nc-1)); @Variance covariance matrix of the differenced error@
+ 
+ mean_one = U_Y[.,1:nvar_mear_cont]; @Does not get affected by the chosen alternative@
+ mean_one_obs = dta[.,ivgenyc];   @The observed values of the continuous indicators@
+ err_one_var_inv = inv(Full_Error[1:nvar_mear_cont,1:nvar_mear_cont]); @inv of the variacne of the continuous indicator error@
+ 
+ mean_two_final = zeros(nobs,(nc-1));	 @This is the mean w/o dividing by the st. errors@	
+ err_two_final = zeros((nc-1)*nc,(nc-1));  @Will hold the conditional variance of utility with respect to continuous indicators@
+ corr_nc = zeros((nc-1)*nc,(nc-1)); @Will hold the correlation matrix corresponding to err_two_final@ 
+ var_nc = zeros(nc,(nc-1)); @Will hold the diagonals of the conditional errors of the alternatives@
+ mean_nc = zeros(nobs, (nc-1)); @Need to be adjusted for the correct alternative chosen, need to be divided by the correct st. error@
+ 
+ @mq is a column vector that holds the first chosen alternative for an individual@
+ @m is a column vector that contains the number of chosen alternatives for an individual@
+ for i(1,nc,1);
+	@Get the M depending on the choice of the alternative@
+	app1 = MBig[(i-1)*(nvar_mear_cont+ncDiff)+1:i*(nvar_mear_cont+ncDiff),.]; @Get the appropriate M depending on which alternative has been chosen@
+	U_Y1 = (app1*U_Y')'*~ (mq .== i); @Utility is a nobs by nc matrix@ @Direct product will have nobs rows and nc columns@
+	UY_Tild = UY_Tild + U_Y1; @This is an nobs by (nc-1), appropriately created depending on which alternative has been chosen@
+	errDiff = app1*Full_error*app1'; @The error difference matrix@
+	Error_Tild[(i-1)*(nvar_mear_cont+ncDiff)+1:i*(nvar_mear_cont+ncDiff),.] = errDiff;
+	
+	@Calculation of conditional mean@
+	mean_two = U_Y1[.,nvar_mear_cont+1:nvar_mear_cont+nc-1]; @Adjuested for the chosen alternative@
+	err_two_var = errDiff[nvar_mear_cont+1:nvar_mear_cont+nc-1,nvar_mear_cont+1:nvar_mear_cont+nc-1]; @Adjusted for the chosen alternative@	 @An nc-1 by nc-1 matrix@
+	cov_one_two = errDiff[nvar_mear_cont+1:nvar_mear_cont+nc-1,1:nvar_mear_cont]; @Correlation matrix adjusted for chosen alternative@
+	mean_two_final = mean_two_final + (mean_two + (cov_one_two * err_one_var_inv * (mean_one_obs - mean_one)')') *~ (mq .== i); @An nobs by nc-1 matrix@
+	clear errDiff;
+	
+	@Calculation of conditional variance@
+	errDiff  = err_two_var - (cov_one_two * err_one_var_inv * cov_one_two'); @This is the conditional error variance covariance matrix adjusted for the chosen alternative@
+	err_two_final[(i-1)*ncDiff+1:i*ncDiff,.] = errDiff;
+	var_nc[i,.] = (diag(errDiff))'; @Diagonal elements of the conditionla error variane covatiance matrix@
+	mean_nc = mean_nc +  ((mean_two_final *~ (mq .== i)) ./ sqrt(diag(errDiff)')); @Making the square root of the error difference a row vector@
+	corr_nc[(i-1)*ncDiff+1:i*ncDiff,.] = diagrv(corrvc(errDiff),ones((nc-1),1));
+	clear U_Y1, errDiff, err_two_var, cov_one_two, mean_two;
+ endfor;
+
+ p4 = zeros(nobs,1);
+ seedn = seednext; //A different seed is used for each individual, across iterations the seed remain the same
+ sq = seedn;
+ 
+ j=1;//Begining of the loop through the individual
+ do while j <= nobs;
+	if m[j]==1;
+		mean_one_i = UY_Tild[j,1:nvar_mear_cont]'; @Needs to be a column vector@
+		mean_one_obs_i = (dta[j,ivgenyc])';
+		err_one_var_i = Full_Error[1:nvar_mear_cont,1:nvar_mear_cont]; @Taking difference does not have any effect on this error var matrix@ @Full_error is a nvar_mear_cont by nvar_mear_cont matrix@
+	
+		mean_nc_i = -mean_nc[j,.]; @Mean divided by standard deviation@ @This is a row vector@
+		corr_nc_i = corr_nc[(mq[j]-1)*ncDiff+1:mq[j]*ncDiff,.]; @The conditional correlation matrix@
+		
+		p1 = pdfmvn(mean_one_obs_i,mean_one_i,err_one_var_i); @joint normal pdf calculation of the continuous indicators@
+
+		if(nc-1 == 2);
+			p3 = cdfbvn(mean_nc_i[1], mean_nc_i[2], corr_nc_i[1,2]);
+		else;
+			{ p3,sq } = cdfmvna(mean_nc_i,corr_nc_i,seedn);	
+		endif;
+		
+		clear mean_one_i, mean_one_obs_i, err_one_var_i, mean_nc_i, corr_nc_i;		
+	
+	// Case 2: only interior soultions - all the available alternatives are chosen - only a joint normal pdf needs to be calculated
+	elseif m[j] == nc;
+		mean_one_i = UY_Tild[j,.]'; @Need to be a column vector for passing into pdfmvn@
+		mean_one_obs_i = (dta[j,ivgenyc])'|zeros((nc-1),1);
+		err_one_var_i = Error_Tild[(mq[j]-1)*(nvar_mear_cont+ncDiff)+1:mq[j]*(nvar_mear_cont+ncDiff),.];
+		
+		p1 = Jac[j]*pdfmvn(mean_one_obs_i, mean_one_i, err_one_var_i); @Calculation of the joint normal pdf@
+		p3 = 1;
+		
+		clear mean_one_i, mean_one_obs_i, err_one_var_i;
+		
+		// Case 3: corner and interior solutions - both the joint normal pdf and joint normal cdf need to be calculated
+	else;
+		ch = seqa((nvar_mear_cont+1),1,nc-1)' .* cq[j,.];
+		ch = selif(ch',(ch' .!=0))'; @ch is a row vector@  
+		mear_ch = seqa(1,1,nvar_mear_cont)'~ch; 
+		nch = seqa((nvar_mear_cont+1),1,(nc-1))' .* (cq[j,.].==0); 
+		nch = selif(nch',(nch' .!=0))'; @nch is a row vector too@
+		Error_Tild_i = Error_Tild[(mq[j]-1)*(nvar_mear_cont+ncDiff)+1:mq[j]*(nvar_mear_cont+ncDiff),.]; @Taking the error difference matrix adjusted by the chosen alternative@
+		
+		mean_one_i = UY_Tild[j,mear_ch]'; //Contains the continuous indicators and deterministic portion of the utility for the chosen alternatives without mq in a column vector 
+		mean_one_obs_i = (dta[j,ivgenyc])'|(zeros(cols(ch),1)); @Reported values of the continuous indicators@
+		err_one_var_i = Error_Tild_i[mear_ch,mear_ch]; @Variance-covariance matrix of the continuous indicators and the chosen alternatives@
+		err_one_var_inv_i = inv(err_one_var_i);
+		
+		p1 = Jac[j]*pdfmvn(mean_one_obs_i, mean_one_i, err_one_var_i);//The joint normal pdf of the chosen alternatives without mq
+			
+		@Calcualtion of conditional mean and conditional variance@	
+		mean_two_i = UY_Tild[j,nch]'; //Making it a column vector
+		err_two_var_i = Error_Tild_i[nch,nch]; @variance-covariance matrix of the non-chosen alternatives@
+		cov_one_two_i = Error_Tild_i[nch,mear_ch]; @The covariance matrix@
+			
+		mean_two_final_i = mean_two_i + cov_one_two_i * err_one_var_inv_i * (mean_one_obs_i - mean_one_i); @Conditional mean of the non-chosen alternatives@
+		err_two_final_i = err_two_var_i - (cov_one_two_i * err_one_var_inv_i * cov_one_two_i');  @conditional variance-covariance of the non-chsen alternatives@
+			
+		mean_nc_i = -(mean_two_final_i)./sqrt(diag(err_two_final_i)); @Both are column matrices@
+		corr_nc_i = diagrv(corrvc(err_two_final_i), ones(cols(nch),1));
+				
+		if(cols(nch) == 1);
+			p3 = cdfn(mean_nc_i);
+		elseif(cols(nch)==2);
+			p3 = cdfbvn(mean_nc_i[1], mean_nc_i[2],corr_nc_i[1,2]);
+		else;
+			{ p3,sq } = cdfmvna(mean_nc_i',corr_nc_i,seedn);	
+		endif;
+			
+		clear ch, mear_ch, nch, Error_Tild_i, mean_one_i, mean_one_obs_i, err_one_var_i, mean_two_i, err_two_var_i,
+		cov_one_two_i, mean_two_final_i, err_two_final_i, mean_nc_i, corr_nc_i, err_one_var_inv_i; 			
+	endif; @End of check for how many alternatives have been consumed@
+			
+	p4[j] = p1*p3; 
+	seedn = sq;
+	j = j+1;
+endo; @End of looping for individual@
+
+	//ww1 = zeros(5,1);
+	ww1=zeros(nobs,1);
+	if p4 > ww1;
+		z1 = ln(p4);
+		post_obs = ones(nobs,1);
+	else;
+		z1=ln(p4-((p4.<=ww1).*(p4-0.0001)));
+		post_obs = ((p4.<=ww1).*0)+(p4.>ww1);
+	endif;
+retp(z1);
+endp;
+
+proc lgdnorm(x,dta);
+    local nparam, Alpha_coeff,  delta_coeff, d_matrix_coeff, Psi_chol, xbase, Lambda_coeff, xdel,
+	xgam, xcov, Chol_Alpha_corr_adjusted, Chol_Alpha_corr_adjusted1, i,j, temp, Chol_Alpha_corr, 
+	Alpha_corr, D_matrix, Psi_matrix, Lambda, covn, AlphaW, z, y,   v2, w2, u2, v, w,u, vv, a, f, b, m, mq,
+	Vf, cqq, cq, sel, Jac,e,d,  U_Y,e1, e12, e21, e22, Full_error, MBig, iden_matrix, one_negative, ncDiff,
+	im, Mmat,  mean_one, mean_one_obs, err_one_var_inv,  
+	 app1, U_Y1, UY_Tild, errDiff, Error_Tild, mean_two, err_two_var, cov_one_two,
+	mean_two_final, err_two_final,var_nc, mean_nc, corr_nc, alpha_coeff_d, AlphaWd, zd, yd1, Full_error_df, 
+	ia_corr, icheck, jcheck, d_chol_alpha_corr1, Alpha_corrd, Full_error_d, delta_coeff_d, yd2, 
+	d_matrix_coeff_d, yd3, D_matrix_d, d_chol_psi, psidd, psid,xbase_d, v2_d,
+	gamma_score, xgam_grad, u2_grad, v_grad, u_grad, v_gradG, f_grad, jac_grad1, jac_grad2_top, jac_grad2_bottom,
+	jac_grad2, jac_gradG, lambda_coeff_d, v_grad2, lambda_mat_d, covn_chol_dd1, covn_chol_dd, yd11, yd22, yd,err_one_var_d, UY_Tild_d, mean_two_d, mean_nc_d, Error_Tild_d, err_one_var_vech, shi_r_unq, 
+	errDiff_d1, Error_Tild_i, err_two_var_arr, cov_one_two_arr, cov_one_two_arrt, err_two_var_d, cov_one_two_d,
+	cov_one_two_d_t, mean_two_d1, mean_two_d2, 	mean_two_d3, mean_two_d4,mean_two_df,  errDiff_d2, 
+	err_two_final_d, err_two_final_iarr, var_nc_i, var_nc_iarr, var_nc_d, corr_nc_d, mean_nc_d1, var_nc_dmat, 
+	mean_nc_d2,   gradient, Vf_grad, U_Yd, activeN,mean_one_obs_arr, mean_one_arr, mean_one_d, err_one_var, err_one_var_arr, 
+	err_one_var_inv_arr, d_chol_alpha_corr, covn_dd, v2_grad, UY_Tild_d1, err_one_var_vech_ind;	
+	local gg, mean_one_i, mean_one_obs_i, err_one_var_i, mean_nc_i, corr_nc_i, p1, p1_grad_mean, p1_grad_cov,
+	p1_dd, p3, p3_grad, p3_dd, ch, nch, mear_ch,  err_one_var_inv_i, err_one_var_inv_iarr,
+	mean_one_d_i, mean_one_d_iarr, err_one_var_d_i,err_two_var_d_i, cov_one_two_d_i, cov_one_two_d_it,
+	mean_two_i, err_two_var_i, cov_one_two_i,	err_two_var_iarr, cov_one_two_iarr, cov_one_two_iarrt,
+	mean_two_final_i, err_two_final_i, 	  mean_two_d_i1, mean_two_d_i2,
+	mean_two_d_i3, mean_two_d_i4, mean_two_d_i, error_two_final_d_i,var_nc_d_i, mean_nc_d_i, corr_nc_d_i, err_one_var_vech_i, 
+	shi_r_unq_i, errDum, seedn, sq, Error_Tild_d_i, var_nc_d_imat, v_grad_alpha;
+	
+	print "x: " x';
+	
+	@nparam is the total number of parameters in the model including the inactive parameters@
+	nparam =  rows(x);  //print "nparam: " nparam;
+ 
+	Alpha_coeff        =  x[1:nvarml]; @structural equation parameters@
+	Chol_Alpha_corr    =  upmat(xpnd(x[nvarml+1:nvarml+nCholOmega])); @Creates a matrix@
+	delta_coeff        =  x[nvarml+nCholOmega+1:nvarml+nCholOmega+nvar_mear]; @Means of measurement equation@
+	d_matrix_coeff     =  x[nvarml+nCholOmega+nvar_mear+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear]; @Factor loadings@
+	Psi_chol           =  diagrv(eye(nvar_mear_cont),(x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont])); @ms eq. error corr.@
+	xbase 			   = x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm]; //Baseline utility parameters
+	Lambda_coeff 	   = x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent]; //Latent variable coefficient into the baseline utility
+	xdel  			   = eqmatdel'*x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent+rows(eqmatdel)]; //Converts the no. of alpha parameters to be estimated to the total no. of alternatives, nc
+	xgam  			   = eqmatgam'*x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent+rows(eqmatdel)+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)];//same as above
+	xcov  			   = upmat(xpnd(x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)+1:rows(x)])); //Get the cholesky factors
+	
+	Chol_Alpha_corr_adjusted = Chol_Alpha_corr';
+	Chol_Alpha_corr_adjusted1 = Chol_Alpha_corr';
+		
+	@Why doing this?@
+	for i(2,rows(Beta_corr),1);
+		for j(1,i,1);
+			if (i ne j);
+				temp = sumc(Chol_Alpha_corr_adjusted1[i,1:i-1]'.*Chol_Alpha_corr_adjusted1[i,1:i-1]');
+				Chol_Alpha_corr_adjusted[i,j] = Chol_Alpha_corr_adjusted1[i,j]/sqrt(1+temp);
+				clear temp;
+			endif;
+				
+			if (i eq j);
+				temp = sumc(Chol_Alpha_corr_adjusted1[i,1:i-1]'.*Chol_Alpha_corr_adjusted1[i,1:i-1]');
+				Chol_Alpha_corr_adjusted[i,j] = 1/sqrt(1+temp);
+				clear temp;
+			endif;
+		endfor;
+	endfor;
+	   
+	Chol_Alpha_corr = Chol_Alpha_corr_adjusted';
+	
+ Alpha_corr = Chol_Alpha_corr' * Chol_Alpha_corr; //Get the variance-covariance matrix of the latent variable
+ D_matrix   = reshape(d_matrix_coeff,nvar_mear, nvar_latent); //reshape the factor loadings in nvar_mear x nvar_latent format
+ Psi_matrix = Psi_chol' * Psi_chol; //Get the variance-covariance matrix of the indicators
+ Lambda 	= reshape(Lambda_coeff, nc, nvar_latent); //  Reshape the Lambda_coeff into nc by nvar_latent format
+ covn = xcov'*xcov; //xcov is a upper triangular matrix
+ 
+ 
+ AlphaW = (ones(nvar_latent,1) .*. Alpha_coeff  )*~(dta[.,ivl])';
+ z = {}; j = 1;	
+ do until j > nvar_latent;
+	z = z~(sumc(AlphaW[(j-1)*nvarml+1:(j*nvarml),.]));                // Z stores the latent variables value for each observation. nobs X nvar_latent. 1st col has z1, 2nd z2 and so on for all observations.
+    j = j+1;
+endo;
+
+ 
+ @For each measurement equation, factor loading gets mult. by teh latent variable and summed up@
+ y = ((D_matrix * z') + delta_coeff)'; // Y stores the Y variables value for each observation. nobs X nvar_mear. 1st col has Y1, 2nd Y2 and so on for all observations.
+
+//multiply the variables with the appropriate betas for all the alternatives
+ v2 = (ones(nc,1) .*. xbase)*~(dta[.,ivm])';
+ w2 = (ones(nc,1) .*. xdel)*~(dta[.,ivd])'; //For alpha
+ u2 = (ones(nc,1) .*. xgam)*~(dta[.,ivg])'; //For gamma
+
+//Sum the deterministic portion of the utility, alpha and gamma
+ j=1;
+ v = {};
+ w = {};
+ u = {};
+ do until j == nc+1;
+   v = v~(sumc(v2[(j-1)*nvarm+1:(j*nvarm),.]));			// beta*zeta deterministic
+   w = w~(sumc(w2[(j-1)*nvardel+1:(j*nvardel),.]));		// alpha
+   u = u~(sumc(u2[(j-1)*nvargam+1:(j*nvargam),.]));		// gamma
+   j = j+1;
+ endo;
+ //At the end of the loop, v, w and u are nobs x nc matrices
+
+ vv = v + (Lambda * z')'; //Add latent variable into the baseline utility
+ 
+ clear v2,w2,u2;
+ 
+ @Convertion of alpha parameter@
+ a = exp(w);		
+ if _alp0to1;
+   a = 1/(1+exp(w)); 		// a is 1-alpha
+ endif;
+ 
+ @Conversion of gamma parameter@
+ f = exp(u);				// gamma
+ b = dta[.,flagchm] .> 0;	// 1 if chosen, 0 if not //A nobs x nc matrix
+ m = sumc(b');				// number of chosen alternatives  //an nobs x 1 column vector
+  
+ // Identifying alternative mq
+ mq = b.* (seqa(1,1,nc))'; //Convert the 1's into the serial number of the alternatives
+ mq = substute(mq,b.==0,nc+1); //Give a number greater than the total number of alternatives to the unchosen alternatives
+ mq = minc(mq'); //Select the id of the first chosen alternative //mq is a nobs x 1 column vector
+ 
+ //All the matrices in this equation are nobs x nc, must require the use of dot operator
+ Vf = vv-a.*ln((dta[.,flagchm]+f)./f)-ln(dta[.,flagprcm]);	// deterministic component V //An nobs by nc matrix
+
+ //Taking differences w/r to alternative mq
+ cqq = reshape(((seqa(1,1,nc).*.ones(1,nobs)))', nobs*nc, 1 ); //cqq is a column of the seq of alternative numbers repeated nobs times
+ cq = reshape(b, nobs*nc, 1 ); //Convert b into a column, where the seq is the participation indicator for 1st obs then for second observation and so on
+ sel = cqq.*(cqq .!= (mq.*.ones(nc,1)));
+ cq = reshape(selif(cq, cqq .== sel), nobs, nc-1); //cq is b arranged an nobs x (nc- 1) matrix//alternatives are 1 0 with 1 for selected and 0 for non-selected
+ 
+ //Jacobian computation - not dividing by the price of mq, 
+ //Correct if no price variation - need to correct if there is price variation
+ Jac = (a.*b)./((dta[.,flagchm]+f));
+ Jac = Jac./(dta[.,flagprcm]); 
+ Jac = substute(Jac,b.==0,1); //
+ e = (1/Jac).*b;  //nobs x nc matrix
+ d = sumc((e'));//nobs x 1, the summation portion of the Jacobian
+ Jac = (prodc((Jac'))).*d; //An nobs by 1 matrix
+ 
+ U_Y = (y'|Vf')'; //concatenating the continuous indicator and the deterministinc portion of the utility
+ e1   = ( D_matrix * Alpha_corr * D_matrix' + Psi_matrix ); @An nvar_mear x nvar_mear matrix@
+ e12  = ( D_matrix * Alpha_corr * Lambda'); @nvar_mear x nc matrix@
+ e21  = ( Lambda * Alpha_corr * D_matrix'); @nc x nvar_mar matrix@
+ e22  = ( Lambda * Alpha_corr * Lambda' + covn); @nc x nc matrix@
+ 
+ 
+
+ @Full error is a (nvar_mear + nc) x (nvar_mear + nc) matrix@
+ Full_error = (e1~e12);
+ Full_error = Full_error | (e21~e22);
+   
+//Next two code blocks create the M matrix
+ MBig = zeros((nvar_mear+nc-1)*nc,(nvar_mear+nc));
+ iden_matrix = eye(nc-1);
+ one_negative = -ones(nc-1,1);
+ ncDiff = nc-1;
+    
+  for im(1,nc,1);
+	if(im eq 1);
+		Mmat = one_negative ~ iden_matrix; @First column is filled up by -1, the rest of the matrix is filled up by (nc-1) identity matrix@
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+1:((im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont),1:nvar_mear_cont] =eye(nvar_mear_cont);
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont+1:im*(nvar_mear_cont+ncDiff),nvar_mear_cont+1:nvar_mear_cont+nc] = Mmat;
+		clear Mmat;
+	elseif(im eq nc);
+		Mmat = iden_matrix ~ one_negative;	@Last column is filled up by -1, the rest of the matrix is filled up by (nc-1) identity matrix@
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+1:((im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont),1:nvar_mear_cont] =eye(nvar_mear_cont);
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont+1:im*(nvar_mear_cont+ncDiff),nvar_mear_cont+1:nvar_mear_cont+nc] = Mmat;
+		clear Mmat;
+	else;
+		Mmat = iden_matrix[.,1:im-1] ~ one_negative ~ iden_matrix[.,im:nc-1]; @Choice column filled up by -1@
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+1:((im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont),1:nvar_mear_cont] =eye(nvar_mear_cont);
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont+1:im*(nvar_mear_cont+ncDiff),nvar_mear_cont+1:nvar_mear_cont+nc] = Mmat;
+		clear Mmat;
+	endif;
+endfor;
+ @MBig has been checked for correctness@
+   
+ @NEXT CREATE hj, covj, corrj, om - ALL OF THESE WILL VARY BY WHICH ALTERNATIVE IS CHOSEN@
+ UY_Tild = zeros(nobs,(nvar_mear_cont+nc-1)); @This will hold the differenced mean@
+ Error_Tild = zeros((nvar_mear_cont+nc-1)*(nc),(nvar_mear_cont+nc-1)); @Variance covariance matrix of the differenced error@
+ 
+ mean_one = U_Y[.,1:nvar_mear_cont]; @Does not get affected by the chosen alternative@
+ mean_one_obs = dta[.,ivgenyc];   @The observed values of the continuous indicators@
+ err_one_var_inv = inv(Full_Error[1:nvar_mear_cont,1:nvar_mear_cont]); @inv of the variacne of the continuous indicator error@
+ 
+ mean_two_final = zeros(nobs,(nc-1));	 @This is the mean w/o dividing by the st. errors@	
+ err_two_final = zeros((nc-1)*nc,(nc-1));  @Will hold the conditional variance of utility with respect to continuous indicators@
+ corr_nc = zeros((nc-1)*nc,(nc-1)); @Will hold the correlation matrix corresponding to err_two_final@ 
+ var_nc = zeros(nc,(nc-1)); @Will hold the diagonals of the conditional errors of the alternatives@
+ mean_nc = zeros(nobs, (nc-1)); @Need to be adjusted for the correct alternative chosen, need to be divided by the correct st. error@
+ 
+ @mq is a column vector that holds the first chosen alternative for an individual@
+ @m is a column vector that contains the number of chosen alternatives for an individual@
+ for i(1,nc,1);
+	@Get the M depending on the choice of the alternative@
+	app1 = MBig[(i-1)*(nvar_mear_cont+ncDiff)+1:i*(nvar_mear_cont+ncDiff),.]; @Get the appropriate M depending on which alternative has been chosen@
+	U_Y1 = (app1*U_Y')' *~ (mq .== i); @Utility is a nobs by nc matrix@ @Direct product will have nobs rows and nc columns@
+	UY_Tild = UY_Tild + U_Y1; @This is an nobs by (nc-1), appropriately created depending on which alternative has been chosen@
+	errDiff = app1*Full_error*app1'; @The error difference matrix@
+	Error_Tild[(i-1)*(nvar_mear_cont+ncDiff)+1:i*(nvar_mear_cont+ncDiff),.] = errDiff;
+	
+	@Calculation of conditional mean@
+	mean_two = U_Y1[.,nvar_mear_cont+1:nvar_mear_cont+nc-1]; @Adjuested for the chosen alternative@
+	err_two_var = errDiff[nvar_mear_cont+1:nvar_mear_cont+nc-1,nvar_mear_cont+1:nvar_mear_cont+nc-1]; @Adjusted for the chosen alternative@	 @An nc-1 by nc-1 matrix@
+	cov_one_two = errDiff[nvar_mear_cont+1:nvar_mear_cont+nc-1,1:nvar_mear_cont]; @Correlation matrix adjusted for chosen alternative@
+	mean_two_final = mean_two_final + (mean_two + (cov_one_two * err_one_var_inv * (mean_one_obs - mean_one)')') *~ (mq .== i); @An nobs by nc-1 matrix@
+	clear errDiff;
+	
+	@Calculation of conditional variance@
+	errDiff  = err_two_var - (cov_one_two * err_one_var_inv * cov_one_two'); @This is the conditional error variance covariance matrix adjusted for the chosen alternative@
+	err_two_final[(i-1)*ncDiff+1:i*ncDiff,.] = errDiff;
+	var_nc[i,.] = (diag(errDiff))'; @Diagonal elements of the conditionla error variane covatiance matrix@
+	mean_nc = mean_nc +  ((mean_two_final ./ sqrt(diag(errDiff)')) *~ (mq .== i)); @Making the square root of the error difference a row vector@
+	corr_nc[(i-1)*ncDiff+1:i*ncDiff,.] = diagrv(corrvc(errDiff),ones((nc-1),1));
+	clear U_Y1, errDiff, err_two_var, cov_one_two, mean_two, errDiff;
+endfor;
+ 
+ print "Error_Tild: " Error_Tild;
+ 
+	//GRADIENT WITH RESPECT TO ALPHA - Will effect the mean of the measurement equations as well as the deterministic portion of the utility
+	alpha_coeff_d = eye(nvarml) *~ _max_active[1:nvarml]; @Create nvarml numbers of alpha_score and check for whether the parameter is fixed or not@
+	AlphaWd = (dta[.,ivl])' *~ (ones(nvar_latent,1) .*. alpha_coeff_d); @Has nvarml*nvar_latent rows and nvarml*nobs cols@
+	
+	j = 1;
+	zd = {};	
+	do until j > nvar_latent;
+		zd = zd~(sumc(AlphaWd[(j-1)*nvarml+1:(j*nvarml),.]));			
+		j = j+1;
+	endo; //zd is a (nvarml*nobs) x nvar_latent matrix, each block of nvarml is for one individual
+	
+	yd1 = (D_matrix*zd')'; @yd1 is nvarml*nobs by nvar_mear, each block of nvarml is for one person@
+	v_grad_alpha = (Lambda*zd')'; @v_grad_alpha is nobs*nvarml by nc matrix@
+	
+	Full_error_df = arrayinit((nparam|(nvar_mear_cont+nc)|(nvar_mear_cont+nc)),0); @This will hold the derivative of  the (nvar_mear_cont+nc) by (nvar_mear_cont+nc) full_error with respect to different parameters@
+	err_one_var_vech_ind = zeros(nparam, (nvar_mear)*(nvar_mear+1)/2);
+	//GRADIENT WITH RESPECT TO ALPHA_CORR
+ for ia_corr(1,nCholOmega,1);
+    for icheck(1,rows(Chol_Corr_Map),1);
+		for jcheck(1,(icheck-1),1);
+			if( (ia_corr eq Chol_Corr_Map[icheck,jcheck]) AND (Beta_corr_active[icheck,jcheck] eq 1) );
+				d_chol_alpha_corr1 = zeros(rows(Chol_Corr_Map),rows(Chol_Corr_Map)); 
+				temp = sumc(Chol_Alpha_corr_adjusted1[icheck,1:icheck-1]'.*Chol_Alpha_corr_adjusted1[icheck,1:icheck-1]');  
+				d_chol_alpha_corr1[icheck,1:(icheck-1)] = Chol_Alpha_corr_adjusted1[icheck,1:(icheck-1)].*((- Chol_Alpha_corr_adjusted1[icheck,jcheck])/ ( (1+temp)^(3/2) ));
+				d_chol_alpha_corr1[icheck,jcheck] = (1/sqrt(1+temp)) - ( (Chol_Alpha_corr_adjusted1[icheck,jcheck]^2)/ ( (1+temp)^(3/2) ) ); 
+				d_chol_alpha_corr1[icheck,icheck]= (- Chol_Alpha_corr_adjusted1[icheck,jcheck])/ ( (1+temp)^(3/2) );  
+				
+				d_chol_alpha_corr = d_chol_alpha_corr1; @This is a lower triangular matrix@
+				Alpha_corrd = d_chol_alpha_corr*Chol_Alpha_corr + Chol_Alpha_corr'*d_chol_alpha_corr';
+				
+				Full_error_d = zeros(nvar_mear_cont+nc, nvar_mear_cont+nc);
+				Full_error_d[1:nvar_mear_cont,1:nvar_mear_cont]   = ( D_matrix * Alpha_corrd * D_matrix' ); @An nvar_mear x nvar_mear matrix@
+				Full_error_d[1:nvar_mear_cont,nvar_mear_cont+1:nvar_mear_cont+nc]  = ( D_matrix * Alpha_corrd * Lambda'); @nvar_mear x nc matrix@
+				Full_error_d[nvar_mear_cont+1:nvar_mear_cont+nc,1:nvar_mear_cont]  = ( Lambda * Alpha_corrd * D_matrix'); @nc x nvar_mar matrix@
+				full_error_d[nvar_mear_cont+1:nvar_mear_cont+nc,nvar_mear_cont+1:nvar_mear_cont+nc]  = ( Lambda * Alpha_corrd * Lambda'); @nc x nc matrix@
+	   
+				err_one_var_vech_ind[nvarml+ia_corr,.] = vech(Full_error_d[1:nvar_mear_cont,1:nvar_mear_cont])';
+				@Full error is a (nvar_mear + nc) x (nvar_mear + nc) matrix@
+				setarray Full_error_df, (nvarml+ia_corr), Full_error_d;
+                clear temp, Alpha_corrd, Full_error_d, d_chol_alpha_corr, d_chol_alpha_corr1;					   
+			endif;
+		endfor;
+	endfor;
+endfor;
+
+	
+   //GRADIENT WITH RESPECT TO DElTA
+   delta_coeff_d = eye(nvar_mear_cont) *~ _max_active[nvarml+nCholOmega+1:nvarml+nCholOmega+nvar_mear_cont];
+   yd2 = ones(nobs,1) .*. delta_coeff_d'; @yd2 has nvar_mear_cont*nobs by nvar_mear_cont columns, each nvar_mear block is for one individual@
+   
+   //GRADIENT WITH RESPECT TO FACTOR LOADING
+   @Each row represenst one factor loading derivative@
+   d_matrix_coeff_d = eye(nvar_latent*nvar_mear) *~ _max_active[nvarml+nCholOmega+nvar_mear_cont+1:nvarml+nCholOmega+nvar_mear_cont+nvar_latent*nvar_mear_cont];
+   
+   yd3 = {};
+   for j(1,nvar_mear_cont*nvar_latent,1);
+		D_matrix_d = reshape(d_matrix_coeff_d[.,j],nvar_mear_cont,nvar_latent);
+		yd3 = yd3~(D_matrix_d*z')'; @Concatenating row wise each nobs by nvar_mear matrix@ @Each block of nobs by nvar_mear matrix os for one parameter@
+		Full_error_d = zeros(nvar_mear_cont+nc,nvar_mear_cont+nc);
+		
+		Full_error_d[1:nvar_mear_cont,1:nvar_mear_cont]   = ( D_matrix_d*Alpha_corr*D_matrix' + D_matrix*Alpha_corr*D_matrix_d' ); @An nvar_mear x nvar_mear matrix@
+		Full_error_d[1:nvar_mear_cont,nvar_mear_cont+1:nvar_mear_cont+nc]  = ( D_matrix_d*Alpha_corr*Lambda'); @nvar_mear x nc matrix@
+		Full_error_d[nvar_mear_cont+1:nvar_mear_cont+nc,1:nvar_mear_cont]  = ( Lambda*Alpha_corr*D_matrix_d'); @nc x nvar_mar matrix@
+		
+		err_one_var_vech_ind[nvarml+nCholOmega+nvar_mear+j,.] = vech(Full_error_d[1:nvar_mear_cont,1:nvar_mear_cont])';
+		setarray Full_error_df, (nvarml+nCholOmega+nvar_mear+j), Full_error_d;
+		clear Full_error_d, D_matrix_d;
+	endfor;
+	@Here, yd3 has nobs rows and nvar_mear*(nvar_mear*nvar_latent) cols, Each block of nobs by nvar_mear matrix is for one nvar_mear*nvar_latent parameter@
+       
+   //GRADIENT WRT PSI PARAMETERS
+	d_chol_psi = zeros(nvar_mear_cont,nvar_mear_cont); 						@An nvar_mear_cont by nvar_mear_cont matrix@
+	
+	for j(1,nvar_mear_cont,1); 										
+		if(_max_active[nvarml+nCholOmega+nvar_mear_cont+nvar_latent*nvar_mear_cont+j] .== 1); @Only the diaginals of the cholesky factors are passed@
+				psidd = d_chol_psi;
+				psidd[j,j] = 1;
+				Psid = 2 .*(psidd*Psi_chol); @psi matric is always diagonal, its cholesky factors would always be diagonal too@
+				Full_error_d = zeros(nvar_mear_cont+nc, nvar_mear_cont+nc);
+				Full_error_d[1:nvar_mear_cont,1:nvar_mear_cont] = Psid;
+				
+				err_one_var_vech_ind[nvarml+nCholOmega+nvar_mear+nvar_mear_cont*nvar_latent+j,.] = vech(Full_error_d[1:nvar_mear_cont,1:nvar_mear_cont])';
+				setarray Full_error_df, (nvarml+nCholOmega+nvar_mear+nvar_mear_cont*nvar_latent+j), Full_error_d;
+				clear psidd, Psid, Full_error_d;
+			endif; @If the parameter is not active, need not do anything@
+	endfor;
+ 
+ //GRADIENT WITH RESPECT TO BETA
+ xbase_d = eye(nvarm) *~ _max_active[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear+nvarm];
+ xbase_d = (ones(nc,1) .*. xbase_d); @Repeating each block of nvarm parameters nc times@
+ v2_grad = (dta[.,ivm])' *~ xbase_d; @v2_d has nvarm *nc rows and nvarm*nobs columns@
+ 
+ //GRADIENT WITH RESPECT TO GAMMA, ONLY AFFECTS THE DETERMINISTIC PORTION OF THE UTILITY AS WELL AS THE JACOBIAN
+ gamma_score = eye(rows(eqmatgam)) *~ _max_active[nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+nc*nvar_latent+rows(eqmatdel)+1:nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)]; @Each column corresponds to the derivative with respect to one gamma@ @Also multiply by _max_active to make the ones zero that are not active@
+ gamma_score = eqmatgam'*gamma_score; @Converting it from number of parameters to number of alternatives@ @In case eqmatgam is eye there is no effect@
+ xgam_grad = ones(nc,1) .*. gamma_score; @Repeating the block of gamma score nc times@
+ u2_grad = dta[.,ivg]' *~ xgam_grad; @u2_grad will have nvargam*nc rows and nvargam*nobs columns@
+ 
+ /**************************************************************************************************************************/
+ j = 1;
+ v_grad = {};	
+ u_grad = {};
+ do until j == nc+1;
+	v_grad = v_grad~(sumc(v2_grad[(j-1)*nvarm+1:(j*nvarm),.]));			// beta*zeta deterministic
+	u_grad = u_grad~(sumc(u2_grad[(j-1)*nvargam+1:(j*nvargam),.]));
+	j = j+1;
+endo; 
+//v_grad is a (nvarm*nobs) rows, each chunk of nvarm rows for one nvarm parameters and nc columns
+//u_grad is a (nvargam*nobs) rows, each chunk of nvargam rows for one gamma parameter and nc columns 	  
+  v_gradG = (((dta[.,flagchm].*a).*.ones(nvargam,1)).*u_grad)./((dta[.,flagchm]+f).*.ones(nvargam,1)); @v_gradG i s a nvargam*nobs by nc matrix@
+  
+  //CALCULATION OF GRADIENT OF THE JACOBIAN
+  //WITH RESPECT TO GAMMA PARAMETERS
+  f_grad = (f .*. ones(nvargam,1)).*u_grad; //An (nvargam*nobs) x nc matrix @This is the gradient of u wrt gamma parameters@
+  
+  jac_grad1 = sumc(((-f_grad./((dta[.,flagchm]+f).*.ones(nvargam,1))).*(b.*.ones(nvargam,1)))'); //An (nvargam*nobs) x 1 matrix
+  jac_grad2_top = sumc(((f_grad./(a.*.ones(nvargam,1))).*(b.*.ones(nvargam,1)))'); //(nvargam*nobs) x 1 matrix
+  jac_grad2_bottom = (sumc((((dta[.,flagchm]+f)./a).*b)')).*.ones(nvargam,1); //(nvargam*nobs) x 1 matrix
+  jac_grad2 = jac_grad2_top ./ jac_grad2_bottom; //(nvargam*nobs) x 1 matrix
+  jac_gradG = jac_grad1 + jac_grad2; //(nvargam*nobs) x 1 matrix
+  jac_gradG = reshape(jac_gradG, nobs, nvargam); @Making it a nobs by nvargam matrix@	
+  @jac_grad holds the gradient of the ln of the jacobian with respect to u, which is the parameter underlying the gamma parameter@
+  clear jac_grad1, jac_grad2_top, jac_grad2_bottom, jac_grad2;
+  @jac_gradG is a nobs by nvargam matrix, each row represent derivative of jacobian for one individual@
+ 
+ //GRADIENT WITH RESPECT TO LAMBDA
+ lambda_coeff_d = eye(nc*nvar_latent) *~ _max_active[nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+1:nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+nc*nvar_latent];
+ 
+ v_grad2 = {};
+ for j(1,nc*nvar_latent,1);
+	lambda_mat_d = reshape(lambda_coeff_d[.,j],nc,nvar_latent);
+	v_grad2 = v_grad2~(lambda_mat_d*z')'; @Concatenating column wise each nobs by nc matrix@ @Each block of nobs by nc is for one parameter@
+	Full_error_d = zeros(nvar_mear_cont+nc,nvar_mear_cont+nc);
+	Full_error_d[1:nvar_mear_cont,nvar_mear_cont+1:nvar_mear_cont+nc]  = ( D_matrix*Alpha_corr*lambda_mat_d' ); @nvar_mear x nc matrix@
+	Full_error_d[nvar_mear_cont+1:nvar_mear_cont+nc,1:nvar_mear_cont]  =  (lambda_mat_d*Alpha_corr*D_matrix'); @nc x nvar_mar matrix@
+	Full_error_d[nvar_mear_cont+1:nvar_mear_cont+nc,nvar_mear_cont+1:nvar_mear_cont+nc]  = ( lambda_mat_d*Alpha_corr*Lambda' + Lambda*Alpha_corr*lambda_mat_d'); @nc x nc matrix@
+	
+	@Not entering anything into err_one_var_vech, since it would be zero@
+	setarray Full_error_df, (nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+j), Full_error_d;
+	clear Full_error_d, lambda_mat_d;
+endfor;
+@v_grad2 is a nobs by nc*(nc*nvar_latent) matrix, where each nobs by nc block is the derivative with respct one nc*nvar_latent parameter@
+
+
+//GRADIENT WITH RESPECT TO COVN
+ covn_chol_dd1 = eye(ncov) *~ _max_active[nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)+1:nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)+ncov];
+
+ for j(1,ncov,1);
+	covn_chol_dd = upmat(xpnd(covn_chol_dd1[.,j]));  
+	covn_dd = covn_chol_dd'*xcov +  xcov'*covn_chol_dd;
+	Full_error_d = zeros(nvar_mear_cont+nc,nvar_mear_cont+nc);
+	Full_error_d[nvar_mear_cont+1:nvar_mear_cont+nc,nvar_mear_cont+1:nvar_mear_cont+nc] = covn_dd;
+	
+	@Here also not enterinng anything into err_one_var_vech, since it would be zero@
+	setarray Full_error_df, (nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)+j), Full_error_d;
+	clear covn_dd, Full_error_d;
+endfor;
+
+
+ 
+//JOIN yd1, yd2, AND yd3 - MAKE A NOBS*NPARAM BY NVAR_MEAR_CONT MATRIX
+	yd11 = reshape(yd1, nobs, nvar_mear*nvarml); @Derivative wrt alpha@
+	yd22 = reshape(yd2, nobs, nvar_mear*nvar_mear); @Derivative wrt delta@
+	@yd should be a nparam*nobs by nvar_mear matrix@
+	yd = yd11~zeros(nobs,nvar_mear*ncholOmega)~yd22~yd3~zeros(nobs,nvar_mear*(nvar_mear+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)+ncov));
+	yd = reshape(yd,nparam*nobs,nvar_mear); @yd3 contains the derivative wrt factor loadings@
+	@yd contains the derivative wrt alpha, delta and factor loading@
+    
+ //JOIN v_grad, v_grad2 and jac_gradG - MAKE NOBS*NPARAM BY NC MATRIX
+ v_grad = reshape(v_grad, nobs, nc*nvarm); @Derivative with respect to beta parameters@
+ v_gradG = reshape(v_gradG, nobs, nc*nvargam); @Derivative with respect to gamma parameters@ 
+ v_grad_alpha = reshape(v_grad_alpha, nobs, nc*nvarml); @Derivative with respect to alpha parameters@
+ @U_grad should be a nparam*nobs by nc matrix@
+ Vf_grad = v_grad_alpha~zeros(nobs, nc*(nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear))~v_grad~v_grad2~zeros(nobs,nc*rows(eqmatdel))~v_gradG~zeros(nobs,nc*ncov); @v_grad2 is the derivative wrt lamnda, coefficient to latent variables@
+ Vf_grad = reshape(Vf_grad, (nparam)*nobs, nc); @U_grad holds the derivative @ 
+ 
+ U_Yd = yd~Vf_grad; @An nobs*nparam by nvar_mear_cont+nc matrix@  
+ //print "yd: " yd[1:nvarml,.];
+ 
+ 
+ 
+/************END OF CREATION OF ALL THE GRADIENT********************************************************/
+/********************************************************************************************************/
+
+ @Take the active parameters applicable for the parameters in the error variance covariance matrix@	
+ activeN = zeros(nvarml,1)|ones(nCholOmega,1)|
+		   zeros(nvar_mear,1)|ones(nvar_mear*nvar_latent,1)|ones(nvar_mear,1)|
+		   zeros(nvarm,1)|ones(nc*nvar_latent,1)|
+		   zeros(rows(eqmatdel),1)|zeros(rows(eqmatgam),1)|
+		   ones(ncov,1);
+ activeN = activeN .* _max_active; 
+
+
+ @Creating arrays required to calculate the conditoinal means@
+ mean_one_obs_arr = areshape(mean_one_obs',nparam|nvar_mear_cont|nobs); @Does not need to take any difference, nparam by nvar_mear_cont by nobs array@
+ mean_one_arr = areshape(mean_one',nparam|nvar_mear_cont|nobs); @Does not need to take any difference, nparam by nvar_mear_cont by nobs array@
+ mean_one_d = areshape(yd,nobs|nparam|nvar_mear_cont); @First making it an array where each nobs-th block is an nparam by nvar_mear matrix@
+ mean_one_d = atranspose(mean_one_d,2|1|3); @mean_one_d is a nparam by nobs by nvar_mear array@
+ mean_one_d = atranspose(mean_one_d,1|3|2); @Now mean_one_d is a nparam by nvar_mear by nobs array@
+ 
+ err_one_var = Full_error[1:nvar_mear,1:nvar_mear]; @Does not need to take difference@
+ err_one_var_arr = areshape(err_one_var,nparam|nvar_mear_cont|nvar_mear_cont); 
+ err_one_var_inv_arr = areshape(err_one_var_inv,nparam|nvar_mear_cont|nvar_mear_cont);
+ err_one_var_d = Full_error_df[.,1:nvar_mear_cont, 1:nvar_mear_cont]; @This is a nparam by nvar_mear by nvar_mear array@
+ 
+ UY_Tild_d = zeros(nparam*nobs,(nvar_mear_cont+nc-1)); @Need to be adjusted wrt the chosen alternative@
+ mean_two_d = zeros(nparam*nobs,nc-1); @Will hold the gradient of the conditional mean of the unchosen alternatives@
+ mean_nc_d = zeros(nparam*nobs,(nc-1)); @This will hold the final conditional mean of the alternatives@
+ Error_Tild_d = arrayinit(nc|nparam|(nvar_mear_cont+nc-1)|(nvar_mear_cont+nc-1),0); @Need to take differenc of Full_error_df, depending on which alternative is chosen@
+ err_one_var_vech = zeros(nc*nparam,(nvar_mear_cont+ncDiff)*(nvar_mear_cont+nc)/2); @The array to hold the full nvar_mear_cont+nc-1 vech with respect to the chosen alternative@
+ shi_r_unq = zeros(nc*nparam,(ncDiff)*(ncDiff-1)/2); @Will hold the derivative of the correlation parameters @
+ 
+ 
+ for i(1,nc,1);
+	 app1 = MBig[(i-1)*(nvar_mear_cont+ncDiff)+1:i*(nvar_mear_cont+ncDiff),.]; @Get the appropriate M depending on which alternative has been chosen@
+     UY_Tild_d1 = (app1*U_Yd')' *~ ((mq .*. ones(nparam,1)) .== i); @U_Yd is a nparam*nobs by nvar_mear+nc matrix@
+	 UY_Tild_d = UY_Tild_d + UY_Tild_d1; //UY_Tild_d is a nobs*nparam by nvar_mear + (nc-1) matrix
+	 @UY_Tild_d is the utility differenced with respect to the chosen alternative@
+	 
+	 app1 = areshape(app1,nparam|(nvar_mear_cont+nc-1)|(nvar_mear_cont+nc)); @Making the M matrix an array, to take the difference of the error variance, covariance@
+	 errDiff_d1 = amult(amult(app1,Full_error_df),atranspose(app1,1|3|2)); @Full_error_df is nparam by nvar_mear+nc by nvar_mear+nc@
+	 
+	 setarray Error_Tild_d, i, errDiff_d1; @In the ith position Error_Tild holds the nparam by (nvar_mear+nc-1) by (nvar_mear+nc-1) array@
+     clear app1;
+
+	@Calculation of the conditional mean@
+	Error_Tild_i = Error_Tild[(i-1)*(nvar_mear_cont+ncDiff)+1:i*(nvar_mear_cont+ncDiff),.]; @Taking the appropriate Error_Tild matrix depending on the chosen alternative@
+	err_two_var = Error_Tild_i[nvar_mear_cont+1:nvar_mear_cont+nc-1,nvar_mear_cont+1:nvar_mear_cont+nc-1]; @nc-1 by nc-1 matrix@
+	cov_one_two = Error_Tild_i[nvar_mear_cont+1:nvar_mear_cont+nc-1,1:nvar_mear_cont]; @nc-1 by nvar_mear_cont matrix@
+    clear Error_Tild_i;	
+	
+	err_two_var_arr = areshape(err_two_var, nparam|(nc-1)|(nc-1));        @Making nrapam by (nc-1) by (nc-1) array@
+	cov_one_two_arr = areshape(cov_one_two, nparam|(nc-1)|nvar_mear_cont); @Making nparam by (nc-1) by nvar_mear array@
+	cov_one_two_arrt = atranspose(cov_one_two_arr,1|3|2);
+	
+	@These error gradient matrices are nparam by ... by ... array@
+	err_two_var_d = errDiff_d1[.,nvar_mear_cont+1:nvar_mear_cont+nc-1,nvar_mear_cont+1:nvar_mear_cont+nc-1]; @err_two_var_d is a nparam by nc-1 by nc-1 array@
+	cov_one_two_d = errDiff_d1[.,nvar_mear_cont+1:nvar_mear_cont+nc-1,1:nvar_mear_cont]; @cov_one_two_d is a nparam by nc-1 by nvar_mear_cont array@
+	cov_one_two_d_t = atranspose(cov_one_two_d,1|3|2);
+
+	@mean_two_d will have four parts -  we will calculate the four parts seperately here@
+	mean_two_d1 = UY_Tild_d1[.,nvar_mear_cont+1:nvar_mear_cont+nc-1]; @This is a nparam*nobs by nc-1 matrix@
+	
+	mean_two_d2 = atranspose((amult((amult(cov_one_two_d,err_one_var_inv_arr)),(mean_one_obs_arr-mean_one_arr))),1|3|2); @mean_two_d is a nparam by nobs by (nc-1) array@
+	mean_two_d2 = arraytomat(areshape((atranspose(mean_two_d2,2|1|3)),1|(nparam*nobs)|(nc-1))); @mean_two_d2 is a nparam*nobs by (nc-1) matrix@
+	
+	mean_two_d3 = atranspose((amult((amult((amult((amult(cov_one_two_arr,err_one_var_inv_arr)),err_one_var_d)),err_one_var_inv_arr)),(mean_one_obs_arr-mean_one_arr))),1|3|2); @This is a nparam by nobs by (nc-1) array@
+	mean_two_d3 = arraytomat(areshape((atranspose(mean_two_d3,2|1|3)),1|(nparam*nobs)|(nc-1))); @mean_two_d3 is a nparam*nobs by (nc-1) matrix@			 
+	
+	mean_two_d4 = atranspose((amult(amult(cov_one_two_arr,err_one_var_inv_arr),(-mean_one_d))),1|3|2) ; @mean_two_d4 is a nparam by nobs by (nc-1) array@
+ 	mean_two_d4 = arraytomat(areshape((atranspose(mean_two_d4,2|1|3)),1|(nparam*nobs)|(nc-1))); @mean_two_d4 is a nparam*nobs by (nc-1) matrix@			 
+	
+    mean_two_df  = ((mean_two_d1+mean_two_d2-mean_two_d3+mean_two_d4) *~ ((mq .*. ones(nparam,1)) .== i));	
+	mean_two_d = mean_two_d + mean_two_df;	@Adjusted for the chosen alternative@ 
+    clear mean_two_d1, mean_two_d2, mean_two_d3, mean_two_d4;
+	
+	@Conditional error variance covariance matrix@
+	err_two_final_d = err_two_var_d 
+				- amult((amult(cov_one_two_d,err_one_var_inv_arr)),cov_one_two_arrt)
+	            + amult((amult((amult((amult(cov_one_two_arr,err_one_var_inv_arr)),err_one_var_d)),err_one_var_inv_arr)),cov_one_two_arrt)
+				- amult((amult(cov_one_two_arr,err_one_var_inv_arr)),cov_one_two_d_t); @This is nparam by (nc-1) by (nc-1)@
+	err_two_final_iarr = areshape(err_two_final[(i-1)*ncDiff+1:i*ncDiff,.],nparam|(nc-1)|(nc-1));
+	
+	@Conditional diagonals and gradient of diagonals@
+	var_nc_i = var_nc[i,.];  @This is the variance of the condtional error of the chosen alternatives@
+	var_nc_iarr = areshape(var_nc_i',nparam|(nc-1)|1); @Making the diagonal a column element@
+	var_nc_d = diag(err_two_final_d); @This is a nparam by (nc-1) by 1 array@ @holds the gradient of the variance of the conditional variance of the alternatives@
+	corr_nc_d = (atranspose((err_two_final_d./sqrt(var_nc_iarr)),1|3|2)./sqrt(var_nc_iarr)) - 0.5 .* ((atranspose(((err_two_final_iarr ./(sqrt(var_nc_iarr).*(var_nc_iarr))) .* var_nc_d ),1|3|2) ./(sqrt(var_nc_iarr)))   + ((atranspose((err_two_final_iarr ./(sqrt(var_nc_iarr))),1|3|2) ./(sqrt(var_nc_iarr).*var_nc_iarr)) .* var_nc_d )) ;
+	
+	@Calculating the gradient of mean_nc_d, that is mean_two_final divided by the standard error@	
+	mean_nc_d1 = mean_two_df./sqrt(var_nc_i); @Gradient for the first part - an nobs*nparam by (nc-1) matrix@ 
+	var_nc_dmat = arraytomat(areshape(var_nc_d,nparam|(nc-1)));
+	mean_nc_d2 = 0.5 .*(((mean_two_final *~(mq .== i)).*.ones(nparam,1)).*(ones(nobs,1) .*. var_nc_dmat))./(sqrt(var_nc_i).*var_nc_i); @mean_nc_d2 is a nparam*nobs by (nc-1) matrix@
+	mean_nc_d = mean_nc_d + ((-mean_nc_d1 + mean_nc_d2) *~ ((mq .*. ones(nparam,1)) .== i));
+	clear mean_nc_d1, mean_nc_d2, mean_two_df;
+	
+	for j(1,nparam,1);
+		if(activeN[j] .== 1);
+			err_one_var_vech[(i-1)*nparam+j,.] = vech(arraytomat(areshape(getarray(errDiff_d1,j),(nvar_mear_cont+nc-1)|(nvar_mear_cont+nc-1))))';
+			shi_r_unq[(i-1)*nparam+j,.] = (packr(vecr(arraytomat(getarray(corr_nc_d,j))) + vecr(miss(lowmat(reshape(99999,(nc-1),(nc-1))),99999))))';			
+		endif;
+	endfor;
+	clear errDiff_d1, err_two_var, cov_one_two, err_two_var_arr, cov_one_two_arr, cov_one_two_arrt, err_two_var_d, cov_one_two_d, cov_one_two_d_t,
+		  err_two_final_d, err_two_final_iarr, var_nc_i, var_nc_iarr, var_nc_d, corr_nc_d, var_nc_dmat;
+endfor;
+
+local itemp;
+	for itemp(1,nparam,1);
+		if (activeN[itemp].==1);
+			//print "itemp: " itemp;
+			print "Error_Tild_d: " Error_Tild_d[.,itemp,.,.];
+		endif;
+	endfor;
+//print "Error_Tild_d: " Error_Tild_d;
+ 
+//BEGIN LOOPING THROUGH THE INDIVIDUAL//
+ seedn = seednext; //A different seed is used for each individual, across iterations the seed remain the same
+ sq = seedn;
+ 
+ gg = zeros(nobs, nparam);
+ j=1;//Begining of the loop through the individual
+ do while j <= nobs;
+	if m[j]==1;
+		mean_one_i = UY_Tild[j,1:nvar_mear_cont]'; @Needs to be a column vector@
+		mean_one_obs_i = (dta[j,ivgenyc])';
+		err_one_var_i = Full_Error[1:nvar_mear_cont,1:nvar_mear_cont]; @Taking difference does not have any effect on this error var matrix@ @Full_error is a nvar_mear_cont by nvar_mear_cont matrix@
+	
+		mean_nc_i = -mean_nc[j,.]; @Mean divided by standard deviation@ @This is a row vector@
+		corr_nc_i = corr_nc[(mq[j]-1)*ncDiff+1:mq[j]*ncDiff,.]; @The conditional correlation matrix@
+		
+		p1 = pdfmvn(mean_one_obs_i,mean_one_i,err_one_var_i); @joint normal pdf calculation of the continuous indicators@
+		p1_grad_mean = pdfgmean( mean_one_obs_i,mean_one_i,err_one_var_i); @Returns column matrix@
+		p1_grad_cov = pdfgcov(mean_one_obs_i,mean_one_i,vech(err_one_var_i)); @Returnd column matrix@
+		p1_dd = (1/p1) .* ((p1_grad_mean' * (-yd[(j-1)*nparam+1:j*nparam,.])')
+						   + (p1_grad_cov' * err_one_var_vech_ind')); @This is a 1 by nparam vector@	
+		
+		if(nc-1 == 2);
+			p3 = cdfbvn(mean_nc_i[1], mean_nc_i[2], corr_nc_i[1,2]);
+			p3_grad = cdfbvn_grad(mean_nc_i[1], mean_nc_i[2], corr_nc_i[1,2]);
+			p3_grad = p3_grad';
+		else;
+			{ p3,p3_grad, sq } = pdfmvna(mean_nc_i,corr_nc_i,seedn); @p3_grad is a row vector@	 
+		endif;
+		
+		p3_dd = (1/p3) .* ((p3_grad[1:(nc-1)] * mean_nc_d[(j-1)*nparam+1:j*nparam,.]')
+							+ (p3_grad[nc:cols(p3_grad)] * shi_r_unq[(mq[j]-1)*nparam+1:mq[j]*nparam,.]'));
+		gg[j,.] = p1_dd+p3_dd;
+		
+		clear mean_one_i, mean_one_obs_i, err_one_var_i, mean_nc_i, corr_nc_i, p1, p3, p1_grad_mean, p1_grad_cov;		
+		clear p3_grad, p3_dd, p1_dd;
+		
+	// Case 2: only interior soultions - all the available alternatives are chosen - only a joint normal pdf needs to be calculated
+	elseif m[j] == nc;
+		mean_one_i = UY_Tild[j,.]'; @Need to be a column vector for passing into pdfmvn@
+		mean_one_obs_i = (dta[j,ivgenyc])'|zeros((nc-1),1);
+		err_one_var_i = Error_Tild[(mq[j]-1)*(nvar_mear_cont+ncDiff)+1:mq[j]*(nvar_mear_cont+ncDiff),.];
+		
+		p1 = pdfmvn(mean_one_obs_i, mean_one_i, err_one_var_i); @Calculation of the joint normal pdf@
+		p1_grad_mean = pdfgmean(mean_one_obs_i, mean_one_i, err_one_var_i); @Returns a column vector@
+		p1_grad_cov = pdfgcov(mean_one_obs_i, mean_one_i, vech(err_one_var_i )); @Returns a column vector@
+		p1_dd = (1/p1) .* ((p1_grad_mean' * (-UY_Tild_d[(j-1)*nparam+1:j*nparam,.])')
+						+ (p1_grad_cov' * err_one_var_vech[(mq[j]-1)*nparam+1:mq[j]*nparam,.]')); @This is a 1 by @
+		
+		print "p1: " p1;
+		print "p1_grad_mean: " p1_grad_mean';
+		print "p1_grad_cov: " p1_grad_cov';
+		print "p1_dd: " p1_dd;
+		gg[j,.] = p1_dd;
+		
+		clear mean_one_i, mean_one_obs_i, err_one_var_i;
+		clear p1, p1_grad_mean, p1_grad_cov, p1_dd;
+		// Case 3: corner and interior solutions - both the joint normal pdf and joint normal cdf need to be calculated
+	else;
+		ch = seqa((nvar_mear_cont+1),1,nc-1)' .* cq[j,.];
+		ch = selif(ch',(ch' .!=0))'; @ch is a row vector@  
+		mear_ch = seqa(1,1,nvar_mear_cont)'~ch; 
+		nch = seqa((nvar_mear_cont+1),1,(nc-1))' .* (cq[j,.].==0); 
+		nch = selif(nch',(nch' .!=0))'; @nch is a row vector too@
+		Error_Tild_i = Error_Tild[(mq[j]-1)*(nvar_mear_cont+ncDiff)+1:mq[j]*(nvar_mear_cont+ncDiff),.]; @Taking the error difference matrix adjusted by the chosen alternative@
+		
+		mean_one_i = UY_Tild[j,mear_ch]'; //Contains the continuous indicators and deterministic portion of the utility for the chosen alternatives without mq in a column vector 
+		mean_one_obs_i = (dta[j,ivgenyc])'|(zeros(cols(ch),1)); @Reported values of the continuous indicators@
+		err_one_var_i = Error_Tild_i[mear_ch,mear_ch]; @Variance-covariance matrix of the continuous indicators and the chosen alternatives@
+		err_one_var_inv_i = inv(err_one_var_i);
+		err_one_var_inv_iarr = areshape(err_one_var_inv_i,nparam|cols(mear_ch)|cols(mear_ch));
+		
+		mean_one_d_i = UY_Tild_d[(j-1)*nparam+1:j*nparam,mear_ch]; 
+		mean_one_d_iarr = areshape(mean_one_d_i,nparam|cols(mear_ch)|1); @This is a nparam by cols(mear_ch) by 1 array@
+		
+		Error_Tild_d_i = areshape(getarray(Error_Tild_d,mq[j]),nparam|nvar_mear_cont+nc-1|nvar_mear_cont+nc-1); @This is a nparam by nvar_mear_cont +nc - 1 by nvar_mear_cont+nc - 1 array@
+		err_one_var_d_i = Error_Tild_d_i[.,mear_ch,mear_ch];
+		err_two_var_d_i = Error_Tild_d_i[.,nch,nch];
+		cov_one_two_d_i = Error_Tild_d_i[.,nch,mear_ch];
+		cov_one_two_d_it = atranspose(cov_one_two_d_i,1|3|2);
+		
+		@Calcualtion of conditional mean and conditional variance@	
+		mean_two_i = UY_Tild[j,nch]'; //Making it a column vector
+		err_two_var_i = Error_Tild_i[nch,nch]; @variance-covariance matrix of the non-chosen alternatives@
+		cov_one_two_i = Error_Tild_i[nch,mear_ch]; @The covariance matrix@
+		
+		err_two_var_iarr = areshape(err_two_var_i, nparam|cols(nch)|cols(nch));
+		cov_one_two_iarr = areshape(cov_one_two_i, nparam|cols(nch)|cols(mear_ch));
+	    cov_one_two_iarrt = areshape(cov_one_two_i', nparam|cols(mear_ch)|cols(nch));
+		
+		mean_two_final_i = mean_two_i + cov_one_two_i * err_one_var_inv_i * (mean_one_obs_i - mean_one_i); @Conditional mean of the non-chosen alternatives@
+		err_two_final_i = err_two_var_i - (cov_one_two_i * err_one_var_inv_i * cov_one_two_i');  @conditional variance-covariance of the non-chsen alternatives@
+	    err_two_final_iarr = areshape(err_two_final_i,nparam|cols(nch)|cols(nch)); 	
+		
+		mean_nc_i = -(mean_two_final_i)./sqrt(diag(err_two_final_i)); @Both are column matrices@
+		corr_nc_i = diagrv(corrvc(err_two_final_i), ones(cols(nch),1));
+				
+		//CALCULATION OF GRADIENT	 OF THE MEAN	
+		mean_two_d_i1 = UY_Tild_d[(j-1)*nparam+1:j*nparam,nch]; @This is a nparam by nch matrix@ 
+			
+		//mean_two_d_i2 is a nparam by nch by 1 array, transpose to make it 1 by nch by nparam
+		mean_two_d_i2 = amult((amult(cov_one_two_d_i,err_one_var_inv_iarr)), (areshape((mean_one_obs_i - mean_one_i),nparam|cols(mear_ch)|1)));
+		mean_two_d_i2 = arraytomat(areshape(atranspose(mean_two_d_i2,3|2|1),cols(nch)|nparam)); @Finally it is a nch by nparam matrix@   
+		
+		mean_two_d_i3 = amult((amult(cov_one_two_iarr,(amult((amult(err_one_var_inv_iarr,err_one_var_d_i)), err_one_var_inv_iarr)))),(areshape((mean_one_obs_i - mean_one_i),nparam|cols(mear_ch)|1)));
+		mean_two_d_i3 = arraytomat(areshape(atranspose(mean_two_d_i3,3|2|1),cols(nch)|nparam)); @Finally it is a nch by nparam matrix@   
+		
+		mean_two_d_i4 = amult((amult(cov_one_two_iarr,err_one_var_inv_iarr)),(-mean_one_d_iarr));
+		mean_two_d_i4 = arraytomat(areshape(atranspose(mean_two_d_i4,3|2|1),cols(nch)|nparam)); @Finally it is a nparam by nch matrix@   
+		
+		mean_two_d_i = mean_two_d_i1 + mean_two_d_i2' - mean_two_d_i3' + mean_two_d_i4'; @This is nparam by cols(nch)@
+		
+		//CALCULATION OF GRADIENT OF THE ERROR
+		var_nc_i = diag(err_two_final_i)'; @This is a row vector of size cols(nch)@
+		var_nc_iarr = areshape(var_nc_i,nparam|cols(nch)|1);  @This is a nparam by cols(nch) by 1 array@
+		error_two_final_d_i = err_two_var_d_i -
+							  amult((amult(cov_one_two_d_i,err_one_var_inv_iarr)),cov_one_two_iarrt) + 
+							  amult((amult(cov_one_two_iarr,(amult((amult(err_one_var_inv_iarr, err_one_var_d_i)),err_one_var_inv_iarr)))), cov_one_two_iarrt) -
+							  amult((amult(cov_one_two_iarr,err_one_var_inv_iarr)), cov_one_two_d_it); @This is nparam by nch by nch array@
+		var_nc_d_i = diag(error_two_final_d_i); @This is nparam by cols(nch) by 1@
+		var_nc_d_imat = (arraytomat((areshape(atranspose(var_nc_d_i,3|2|1),cols(nch)|nparam))))'; @Finally this is nparam by nch@
+		
+		mean_nc_d_i = -mean_two_d_i./sqrt(var_nc_i) + 0.5 .*((((mean_two_final_i' .*. ones(nparam,1)).*var_nc_d_imat))./(sqrt(var_nc_i).*var_nc_i)); @mean_nc_d_i is nparam by nch matrix@
+		corr_nc_d_i = (atranspose((error_two_final_d_i./sqrt(var_nc_iarr)),1|3|2)./sqrt(var_nc_iarr)) - 
+		0.5 .* ((atranspose(((err_two_final_iarr ./(sqrt(var_nc_iarr).*(var_nc_iarr))) .* var_nc_d_i ),1|3|2) ./(sqrt(var_nc_iarr)))   + 
+		((atranspose((err_two_final_iarr ./(sqrt(var_nc_iarr))),1|3|2) ./(sqrt(var_nc_iarr).*var_nc_iarr)) .* var_nc_d_i )) ;
+		
+		@Create vech_i and shi_r_unq_i@
+		err_one_var_vech_i = zeros(nparam,cols(mear_ch)*(cols(mear_ch)+1)/2);
+	    if (cols(nch) > 1);
+			shi_r_unq_i = zeros(nparam,cols(nch)*(cols(nch)-1)/2);
+		endif;
+		for i(1,nparam,1);
+			if(activeN[i] .== 0);
+			else;
+				errDum = arraytomat(areshape(getarray(err_one_var_d_i,i),cols(mear_ch)|cols(mear_ch))); @@
+				err_one_var_vech_i[i,.] = vech(errDum)';
+				if(cols(nch) > 1);
+					shi_r_unq_i[i,.] = (packr(vecr(arraytomat(getarray(corr_nc_d_i,i))) + vecr(miss(lowmat(reshape(99999,cols(nch),cols(nch))),99999))))';
+				endif;
+				clear errDum;
+			endif;
+		endfor;
+		
+		@Calculation of gradient of the pdf@
+		p1 = pdfmvn(mean_one_obs_i, mean_one_i, err_one_var_i);//The joint normal pdf of the chosen alternatives without mq
+		p1_grad_mean = pdfgmean(mean_one_obs_i, mean_one_i, err_one_var_i); @Returns column vector@
+	    p1_grad_cov = pdfgcov(mean_one_obs_i, mean_one_i, vech(err_one_var_i));
+		p1_dd = (1/p1) .* ((p1_grad_mean' * (-mean_one_d_i)')
+		                  + (p1_grad_cov' * err_one_var_vech_i'));
+	
+		@Calculation of gradient of the cdf@
+		if(cols(nch) == 1);
+			p3 = cdfn(mean_nc_i);
+			p3_grad = pdfn(mean_nc_i);
+			
+		elseif(cols(nch)==2);
+			p3 = cdfbvn(mean_nc_i[1], mean_nc_i[2],corr_nc_i[1,2]);
+			p3_grad = cdfbvn_grad(mean_nc_i[1], mean_nc_i[2],corr_nc_i[1,2]); @Returns a column vector@
+			p3_grad = p3_grad';
+		else;
+			{ p3,p3_grad,sq } = pdfmvna(mean_nc_i',corr_nc_i,seedn);	
+		endif;
+		
+
+		if (cols(nch) ==1); 
+			p3_dd = (1/p3) .* (p3_grad * mean_nc_d_i') ;
+		else;			
+			p3_dd = (1/p3) .* ((p3_grad[1:cols(nch)] * mean_nc_d_i') 
+					+ (p3_grad[cols(nch)+1:cols(p3_grad)] * shi_r_unq_i')); 
+		endif;
+	
+        gg[j,.] = (p1_dd + p3_dd)	; @This is a 1 by nparam row@
+		
+		clear ch, mear_ch, nch, Error_Tild_i, mean_one_i, mean_one_obs_i, err_one_var_i, mean_two_i, err_two_var_i,
+		cov_one_two_i, mean_two_final_i, err_two_final_i, mean_nc_i, corr_nc_i, err_one_var_inv_i, err_one_var_inv_iarr, 
+		mean_one_d_i, mean_one_d_iarr, Error_Tild_d_i, err_one_var_d_i, err_two_var_d_i,
+		cov_one_two_d_i, cov_one_two_d_it,mean_two_i, err_two_var_iarr, cov_one_two_iarr, cov_one_two_iarrt, 
+		err_two_final_iarr, mean_two_d_i1, mean_two_d_i2, mean_two_d_i3, mean_two_d_i4, mean_two_d_i, var_nc_iarr, error_two_final_d_i,
+		var_nc_d_i, mean_nc_d_i, corr_nc_d_i, err_one_var_vech_i, shi_r_unq_i, errDum, p1, p1_grad_mean,
+		p1_grad_cov, p1_dd, p3, p3_grad, p3_dd;
+		
+	endif; @End of check for how many alternatives have been consumed@
+	seedn = sq;
+	j = j + 1;
+endo; @End of looping for individual@
+
+ gradient = gg[.,1:nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+nc*nvar_latent+rows(eqmatdel)] ~
+(jac_gradG + gg[.,nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+nc*nvar_latent+rows(eqmatdel)+1:nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)])
+~ gg[.,nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)+1:nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)+ncov];
+
+			
+ 		
+ gradient = gradient *~ post_obs;
+ 
+ gradient_store = gradient;
+ retp(gradient);
+ endp;
+ 
+ proc lprnorm1(x,dta);
+ local wt,xbase, xdel,xsigm,xsigmm,xgam,xsd,xcov,v2,w2,u2,j,k, v,vv, Vf,w,u,a,f,b,m,mq,cqq,cq,sel,Jac,e,d, ww1;
+ local covb,covn,ident,min1,p4,seedn,sq,app1,hj,zj,covj,corrj,p1,p2,p2_temp, ch,nch,mear_ch, ha,hb,mu,mu_final,omegacov,omegacorr,z1,count, dummy;
+ local Alpha_coeff, Chol_Alpha_corr, delta_coeff, d_matrix_coeff, Psi_chol, Lambda_coeff, Lambda, Alpha_corr, D_matrix, Psi_matrix, AlphaW, z,y;
+ local U_Y, Full_error, e1, e12, e21, e22,  Mmat, UY_Tild, Error_Tild, mean_one, err_one_var, mean_one_obs, mean_two, err_two_var, cov_one_two, mean_two_changed, err_two_changed, mean_two_final, err_two_varf, err_two_corrf, err_two_final; 
+ local lower_threshold,upper_threshold, lower_threshold_matrix, upper_threshold_matrix, lower_threshold_mat, upper_threshold_mat;
+ local g1,g2, rho_low_g1, rho_low_g2, rho_up_g1, rho_up_g2, corr_g1g2, S, mean_nc, var_nc, st_err_nc, mean_nc_final, corr_nc, SS;
+ local p3, p3_temp, p3_temp_low, p3_temp_up, rho_low_g3, rho_up_g3, g3, lower_threshold_append, upper_threshold_append, mear_nch;
+ local mean_ordl_nc, var_ordl_nc, st_err_ordl_nc, mean_low_final, mean_up_final, corr_ordl_nc, Chol_alpha_corr_adjusted, Chol_alpha_corr_adjusted1, temp;
+ local p3_temp1, p3_temp2, iden_matrix, one_negative, ncDiff, MBig, im;
+ local err_one_var_inv, mean_one_i, mean_one_obs_i, err_one_var_i, mean_nc_i, corr_nc_i, Error_Tild_i;
+ local mean_two_i, err_two_var_i, cov_one_two_i, mean_two_final_i, err_two_final_i, U_Y1, errDiff, err_one_var_inv_i;
+
+
+	Alpha_coeff        =  x[1:nvarml]; @structural equation parameters@
+	Chol_Alpha_corr    =  upmat(xpnd(x[nvarml+1:nvarml+nCholOmega])); @Creates a matrix@
+	delta_coeff        =  x[nvarml+nCholOmega+1:nvarml+nCholOmega+nvar_mear]; @Means of measurement equation@
+	d_matrix_coeff     =  x[nvarml+nCholOmega+nvar_mear+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear]; @Factor loadings@
+	Psi_chol           =  diagrv(eye(nvar_mear_cont),(x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont])); @ms eq. error corr.@
+	xbase 			   = x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm]; //Baseline utility parameters
+	Lambda_coeff 	   = x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent]; //Latent variable coefficient into the baseline utility
+	xdel  			   = eqmatdel'*x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent+rows(eqmatdel)]; //Converts the no. of alpha parameters to be estimated to the total no. of alternatives, nc
+	xgam  			   = eqmatgam'*x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent+rows(eqmatdel)+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)];//same as above
+	xcov  				= upmat(xpnd(x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)+1:rows(x)])); //Get the cholesky factors
+
+	
+ Alpha_corr = Chol_Alpha_corr' * Chol_Alpha_corr; //Get the variance-covariance matrix of the latent variable
+ D_matrix   = reshape(d_matrix_coeff,nvar_mear, nvar_latent); //reshape the factor loadings in nvar_mear x nvar_latent format
+ Psi_matrix = Psi_chol' * Psi_chol; //Get the variance-covariance matrix of the indicators
+ Lambda 	= reshape(Lambda_coeff, nc, nvar_latent); //  Reshape the Lambda_coeff into nc by nvar_latent format
+ covn = xcov'*xcov; //xcov is a upper triangular matrix
+ 
+
+ AlphaW = (ones(nvar_latent,1) .*. Alpha_coeff  )*~(dta[.,ivl])';
+ z = {}; j = 1;	
+ do until j > nvar_latent;
+	z = z~(sumc(AlphaW[(j-1)*nvarml+1:(j*nvarml),.]));                // Z stores the latent variables value for each observation. nobs X nvar_latent. 1st col has z1, 2nd z2 and so on for all observations.
+    j = j+1;
+endo;
+  
+ @For each measurement equation, factor loading gets mult. by teh latent variable and summed up@
+ y = ((D_matrix * z') + delta_coeff)'; // Y stores the Y variables value for each observation. nobs X nvar_mear. 1st col has Y1, 2nd Y2 and so on for all observations.
+
+//multiply the variables with the appropriate betas for all the alternatives
+ v2 = (ones(nc,1) .*. xbase)*~(dta[.,ivm])';
+ w2 = (ones(nc,1) .*. xdel)*~(dta[.,ivd])'; //For alpha
+ u2 = (ones(nc,1) .*. xgam)*~(dta[.,ivg])'; //For gamma
+
+//Sum the deterministic portion of the utility, alpha and gamma
+ j=1;
+ v = {};
+ w = {};
+ u = {};
+ do until j == nc+1;
+   v = v~(sumc(v2[(j-1)*nvarm+1:(j*nvarm),.]));			// beta*zeta deterministic
+   w = w~(sumc(w2[(j-1)*nvardel+1:(j*nvardel),.]));		// alpha
+   u = u~(sumc(u2[(j-1)*nvargam+1:(j*nvargam),.]));		// gamma
+   j = j+1;
+ endo;
+ //At the end of the loop, v, w and u are nobs x nc matrices
+
+ vv = v + (Lambda * z')'; //Add latent variable into the baseline utility
+ 
+ clear v2,w2,u2;
+ 
+ @Convertion of alpha parameter@
+ a = exp(w);		
+ if _alp0to1;
+   a = 1/(1+exp(w)); 		// a is 1-alpha
+ endif;
+ 
+ @Conversion of gamma parameter@
+ f = exp(u);				// gamma
+ b = dta[.,flagchm] .> 0;	// 1 if chosen, 0 if not //A nobs x nc matrix
+ m = sumc(b');				// number of chosen alternatives  //an nobs x 1 column vector
+ 
+ // Identifying alternative mq
+ mq = b.* (seqa(1,1,nc))'; //Convert the 1's into the serial number of the alternatives
+ mq = substute(mq,b.==0,nc+1); //Give a number greater than the total number of alternatives to the unchosen alternatives
+ mq = minc(mq'); //Select the id of the first chosen alternative //mq is a nobs x 1 column vector
+ 
+ //All the matrices in this equation are nobs x nc, must require the use of dot operator
+ Vf = vv-a.*ln((dta[.,flagchm]+f)./f)-ln(dta[.,flagprcm]);	// deterministic component V //An nobs by nc matrix
+
+ //Taking differences w/r to alternative mq
+ cqq = reshape(((seqa(1,1,nc).*.ones(1,nobs)))', nobs*nc, 1 ); //cqq is a column of the seq of alternative numbers repeated nobs times
+ cq = reshape(b, nobs*nc, 1 ); //Convert b into a column, where the seq is the participation indicator for 1st obs then for second observation and so on
+ sel = cqq.*(cqq .!= (mq.*.ones(nc,1)));
+ cq = reshape(selif(cq, cqq .== sel), nobs, nc-1); //cq is b arranged an nobs x (nc- 1) matrix//alternatives are 1 0 with 1 for selected and 0 for non-selected
+ 
+ //Jacobian computation - not dividing by the price of mq, 
+ //Correct if no price variation - need to correct if there is price variation
+ Jac = (a.*b)./((dta[.,flagchm]+f));
+ Jac = Jac./(dta[.,flagprcm]); 
+ Jac = substute(Jac,b.==0,1); //
+ e = (1/Jac).*b;  //nobs x nc matrix
+ d = sumc((e'));//nobs x 1, the summation portion of the Jacobian
+ Jac = (prodc((Jac'))).*d; //An nobs by 1 matrix
+ 
+ U_Y = (y'|Vf')'; //concatenating the continuous indicator and the deterministinc portion of the utility
+ e1   = ( D_matrix * Alpha_corr * D_matrix' + Psi_matrix ); @An nvar_mear x nvar_mear matrix@
+ e12  = ( D_matrix * Alpha_corr * Lambda'); @nvar_mear x nc matrix@
+ e21  = ( Lambda * Alpha_corr * D_matrix'); @nc x nvar_mar matrix@
+ e22  = ( Lambda * Alpha_corr * Lambda' + covn); @nc x nc matrix@
+ 	   
+ @Full error is a (nvar_mear + nc) x (nvar_mear + nc) matrix@
+ Full_error = (e1~e12);
+ Full_error = Full_error | (e21~e22);
+  
+//Next two code blocks create the M matrix
+ MBig = zeros((nvar_mear+nc-1)*nc,(nvar_mear+nc));
+ iden_matrix = eye(nc-1);
+ one_negative = -ones(nc-1,1);
+ ncDiff = nc-1;
+   
+  for im(1,nc,1);
+	if(im eq 1);
+		Mmat = one_negative ~ iden_matrix; @First column is filled up by -1, the rest of the matrix is filled up by (nc-1) identity matrix@
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+1:((im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont),1:nvar_mear_cont] =eye(nvar_mear_cont);
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont+1:im*(nvar_mear_cont+ncDiff),nvar_mear_cont+1:nvar_mear_cont+nc] = Mmat;
+		clear Mmat;
+	elseif(im eq nc);
+		Mmat = iden_matrix ~ one_negative;	@Last column is filled up by -1, the rest of the matrix is filled up by (nc-1) identity matrix@
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+1:((im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont),1:nvar_mear_cont] =eye(nvar_mear_cont);
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont+1:im*(nvar_mear_cont+ncDiff),nvar_mear_cont+1:nvar_mear_cont+nc] = Mmat;
+		clear Mmat;
+	else;
+		Mmat = iden_matrix[.,1:im-1] ~ one_negative ~ iden_matrix[.,im:nc-1]; @Choice column filled up by -1@
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+1:((im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont),1:nvar_mear_cont] =eye(nvar_mear_cont);
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont+1:im*(nvar_mear_cont+ncDiff),nvar_mear_cont+1:nvar_mear_cont+nc] = Mmat;
+		clear Mmat;
+	endif;
+endfor;
+ @MBig has been checked for correctness@
+ 
+ @NEXT CREATE hj, covj, corrj, om - ALL OF THESE WILL VARY BY WHICH ALTERNATIVE IS CHOSEN@
+ UY_Tild = zeros(nobs,(nvar_mear_cont+nc-1)); @This will hold the differenced mean@
+ Error_Tild = zeros((nvar_mear_cont+nc-1)*(nc),(nvar_mear_cont+nc-1)); @Variance covariance matrix of the differenced error@
+ 
+ mean_one = U_Y[.,1:nvar_mear_cont]; @Does not get affected by the chosen alternative@
+ mean_one_obs = dta[.,ivgenyc];   @The observed values of the continuous indicators@
+ err_one_var_inv = inv(Full_Error[1:nvar_mear_cont,1:nvar_mear_cont]); @inv of the variacne of the continuous indicator error@
+ 
+ mean_two_final = zeros(nobs,(nc-1));	 @This is the mean w/o dividing by the st. errors@	
+ err_two_final = zeros((nc-1)*nc,(nc-1));  @Will hold the conditional variance of utility with respect to continuous indicators@
+ corr_nc = zeros((nc-1)*nc,(nc-1)); @Will hold the correlation matrix corresponding to err_two_final@ 
+ var_nc = zeros(nc,(nc-1)); @Will hold the diagonals of the conditional errors of the alternatives@
+ mean_nc = zeros(nobs, (nc-1)); @Need to be adjusted for the correct alternative chosen, need to be divided by the correct st. error@
+ 
+ @mq is a column vector that holds the first chosen alternative for an individual@
+ @m is a column vector that contains the number of chosen alternatives for an individual@
+ for i(1,nc,1);
+	@Get the M depending on the choice of the alternative@
+	app1 = MBig[(i-1)*(nvar_mear_cont+ncDiff)+1:i*(nvar_mear_cont+ncDiff),.]; @Get the appropriate M depending on which alternative has been chosen@
+	U_Y1 = (app1*U_Y')'*~ (mq .== i); @Utility is a nobs by nc matrix@ @Direct product will have nobs rows and nc columns@
+	UY_Tild = UY_Tild + U_Y1; @This is an nobs by (nc-1), appropriately created depending on which alternative has been chosen@
+	errDiff = app1*Full_error*app1'; @The error difference matrix@
+	Error_Tild[(i-1)*(nvar_mear_cont+ncDiff)+1:i*(nvar_mear_cont+ncDiff),.] = errDiff;
+	
+	@Calculation of conditional mean@
+	mean_two = U_Y1[.,nvar_mear_cont+1:nvar_mear_cont+nc-1]; @Adjuested for the chosen alternative@
+	err_two_var = errDiff[nvar_mear_cont+1:nvar_mear_cont+nc-1,nvar_mear_cont+1:nvar_mear_cont+nc-1]; @Adjusted for the chosen alternative@	 @An nc-1 by nc-1 matrix@
+	cov_one_two = errDiff[nvar_mear_cont+1:nvar_mear_cont+nc-1,1:nvar_mear_cont]; @Correlation matrix adjusted for chosen alternative@
+	mean_two_final = mean_two_final + (mean_two + (cov_one_two * err_one_var_inv * (mean_one_obs - mean_one)')') *~ (mq .== i); @An nobs by nc-1 matrix@
+	clear errDiff;
+	
+	@Calculation of conditional variance@
+	errDiff  = err_two_var - (cov_one_two * err_one_var_inv * cov_one_two'); @This is the conditional error variance covariance matrix adjusted for the chosen alternative@
+	err_two_final[(i-1)*ncDiff+1:i*ncDiff,.] = errDiff;
+	var_nc[i,.] = (diag(errDiff))'; @Diagonal elements of the conditionla error variane covatiance matrix@
+	mean_nc = mean_nc +  ((mean_two_final *~ (mq .== i)) ./ sqrt(diag(errDiff)')); @Making the square root of the error difference a row vector@
+	corr_nc[(i-1)*ncDiff+1:i*ncDiff,.] = diagrv(corrvc(errDiff),ones((nc-1),1));
+	clear U_Y1, errDiff, err_two_var, cov_one_two, mean_two;
+ endfor;
+
+ p4 = zeros(nobs,1);
+ seedn = seednext; //A different seed is used for each individual, across iterations the seed remain the same
+ sq = seedn;
+ 
+ j=1;//Begining of the loop through the individual
+ do while j <= nobs;
+	if m[j]==1;
+		mean_one_i = UY_Tild[j,1:nvar_mear_cont]'; @Needs to be a column vector@
+		mean_one_obs_i = (dta[j,ivgenyc])';
+		err_one_var_i = Full_Error[1:nvar_mear_cont,1:nvar_mear_cont]; @Taking difference does not have any effect on this error var matrix@ @Full_error is a nvar_mear_cont by nvar_mear_cont matrix@
+	
+		mean_nc_i = -mean_nc[j,.]; @Mean divided by standard deviation@ @This is a row vector@
+		corr_nc_i = corr_nc[(mq[j]-1)*ncDiff+1:mq[j]*ncDiff,.]; @The conditional correlation matrix@
+		
+		p1 = pdfmvn(mean_one_obs_i,mean_one_i,err_one_var_i); @joint normal pdf calculation of the continuous indicators@
+
+		if(nc-1 == 2);
+			p3 = cdfbvn(mean_nc_i[1], mean_nc_i[2], corr_nc_i[1,2]);
+		else;
+			{ p3,sq } = cdfmvna(mean_nc_i,corr_nc_i,seedn);	
+		endif;
+		
+		clear mean_one_i, mean_one_obs_i, err_one_var_i, mean_nc_i, corr_nc_i;		
+	
+	// Case 2: only interior soultions - all the available alternatives are chosen - only a joint normal pdf needs to be calculated
+	elseif m[j] == nc;
+		mean_one_i = UY_Tild[j,.]'; @Need to be a column vector for passing into pdfmvn@
+		mean_one_obs_i = (dta[j,ivgenyc])'|zeros((nc-1),1);
+		err_one_var_i = Error_Tild[(mq[j]-1)*(nvar_mear_cont+ncDiff)+1:mq[j]*(nvar_mear_cont+ncDiff),.];
+		
+		p1 = Jac[j]*pdfmvn(mean_one_obs_i, mean_one_i, err_one_var_i); @Calculation of the joint normal pdf@
+		p3 = 1;
+		
+		clear mean_one_i, mean_one_obs_i, err_one_var_i;
+		
+		// Case 3: corner and interior solutions - both the joint normal pdf and joint normal cdf need to be calculated
+	else;
+		ch = seqa((nvar_mear_cont+1),1,nc-1)' .* cq[j,.];
+		ch = selif(ch',(ch' .!=0))'; @ch is a row vector@  
+		mear_ch = seqa(1,1,nvar_mear_cont)'~ch; 
+		nch = seqa((nvar_mear_cont+1),1,(nc-1))' .* (cq[j,.].==0); 
+		nch = selif(nch',(nch' .!=0))'; @nch is a row vector too@
+		Error_Tild_i = Error_Tild[(mq[j]-1)*(nvar_mear_cont+ncDiff)+1:mq[j]*(nvar_mear_cont+ncDiff),.]; @Taking the error difference matrix adjusted by the chosen alternative@
+		
+		mean_one_i = UY_Tild[j,mear_ch]'; //Contains the continuous indicators and deterministic portion of the utility for the chosen alternatives without mq in a column vector 
+		mean_one_obs_i = (dta[j,ivgenyc])'|(zeros(cols(ch),1)); @Reported values of the continuous indicators@
+		err_one_var_i = Error_Tild_i[mear_ch,mear_ch]; @Variance-covariance matrix of the continuous indicators and the chosen alternatives@
+		err_one_var_inv_i = inv(err_one_var_i);
+		
+		p1 = Jac[j]*pdfmvn(mean_one_obs_i, mean_one_i, err_one_var_i);//The joint normal pdf of the chosen alternatives without mq
+			
+		@Calcualtion of conditional mean and conditional variance@	
+		mean_two_i = UY_Tild[j,nch]'; //Making it a column vector
+		err_two_var_i = Error_Tild_i[nch,nch]; @variance-covariance matrix of the non-chosen alternatives@
+		cov_one_two_i = Error_Tild_i[nch,mear_ch]; @The covariance matrix@
+			
+		mean_two_final_i = mean_two_i + cov_one_two_i * err_one_var_inv_i * (mean_one_obs_i - mean_one_i); @Conditional mean of the non-chosen alternatives@
+		err_two_final_i = err_two_var_i - (cov_one_two_i * err_one_var_inv_i * cov_one_two_i');  @conditional variance-covariance of the non-chsen alternatives@
+			
+		mean_nc_i = -(mean_two_final_i)./sqrt(diag(err_two_final_i)); @Both are column matrices@
+		corr_nc_i = diagrv(corrvc(err_two_final_i), ones(cols(nch),1));
+				
+		if(cols(nch) == 1);
+			p3 = cdfn(mean_nc_i);
+		elseif(cols(nch)==2);
+			p3 = cdfbvn(mean_nc_i[1], mean_nc_i[2],corr_nc_i[1,2]);
+		else;
+			{ p3,sq } = cdfmvna(mean_nc_i',corr_nc_i,seedn);	
+		endif;
+			
+		clear ch, mear_ch, nch, Error_Tild_i, mean_one_i, mean_one_obs_i, err_one_var_i, mean_two_i, err_two_var_i,
+		cov_one_two_i, mean_two_final_i, err_two_final_i, mean_nc_i, corr_nc_i, err_one_var_inv_i; 			
+	endif; @End of check for how many alternatives have been consumed@
+			
+	p4[j] = p1*p3; 
+	seedn = sq;
+	j = j+1;
+endo; @End of looping for individual@
+
+	//ww1 = zeros(5,1);
+	ww1=zeros(nobs,1);
+	if p4 > ww1;
+		z1 = ln(p4);
+		post_obs = ones(nobs,1);
+	else;
+		z1=ln(p4-((p4.<=ww1).*(p4-0.0001)));
+		post_obs = ((p4.<=ww1).*0)+(p4.>ww1);
+	endif;
+retp(z1);
+endp;
+
+proc lgdnorm1(x,dta);
+    local nparam, Alpha_coeff,  delta_coeff, d_matrix_coeff, Psi_chol, xbase, Lambda_coeff, xdel,
+	xgam, xcov, Chol_Alpha_corr_adjusted, Chol_Alpha_corr_adjusted1, i,j, temp, Chol_Alpha_corr, 
+	Alpha_corr, D_matrix, Psi_matrix, Lambda, covn, AlphaW, z, y,   v2, w2, u2, v, w,u, vv, a, f, b, m, mq,
+	Vf, cqq, cq, sel, Jac,e,d,  U_Y,e1, e12, e21, e22, Full_error, MBig, iden_matrix, one_negative, ncDiff,
+	im, Mmat,  mean_one, mean_one_obs, err_one_var_inv,  
+	 app1, U_Y1, UY_Tild, errDiff, Error_Tild, mean_two, err_two_var, cov_one_two,
+	mean_two_final, err_two_final,var_nc, mean_nc, corr_nc, alpha_coeff_d, AlphaWd, zd, yd1, Full_error_df, 
+	ia_corr, icheck, jcheck, d_chol_alpha_corr1, Alpha_corrd, Full_error_d, delta_coeff_d, yd2, 
+	d_matrix_coeff_d, yd3, D_matrix_d, d_chol_psi, psidd, psid,xbase_d, v2_d,
+	gamma_score, xgam_grad, u2_grad, v_grad, u_grad, v_gradG, f_grad, jac_grad1, jac_grad2_top, jac_grad2_bottom,
+	jac_grad2, jac_gradG, lambda_coeff_d, v_grad2, lambda_mat_d, covn_chol_dd1, covn_chol_dd, yd11, yd22, yd,err_one_var_d, UY_Tild_d, mean_two_d, mean_nc_d, Error_Tild_d, err_one_var_vech, shi_r_unq, 
+	errDiff_d1, Error_Tild_i, err_two_var_arr, cov_one_two_arr, cov_one_two_arrt, err_two_var_d, cov_one_two_d,
+	cov_one_two_d_t, mean_two_d1, mean_two_d2, 	mean_two_d3, mean_two_d4,mean_two_df,  errDiff_d2, 
+	err_two_final_d, err_two_final_iarr, var_nc_i, var_nc_iarr, var_nc_d, corr_nc_d, mean_nc_d1, var_nc_dmat, 
+	mean_nc_d2,   gradient, Vf_grad, U_Yd, activeN,mean_one_obs_arr, mean_one_arr, mean_one_d, err_one_var, err_one_var_arr, 
+	err_one_var_inv_arr, d_chol_alpha_corr, covn_dd, v2_grad, UY_Tild_d1, err_one_var_vech_ind;	
+	local gg, mean_one_i, mean_one_obs_i, err_one_var_i, mean_nc_i, corr_nc_i, p1, p1_grad_mean, p1_grad_cov,
+	p1_dd, p3, p3_grad, p3_dd, ch, nch, mear_ch,  err_one_var_inv_i, err_one_var_inv_iarr,
+	mean_one_d_i, mean_one_d_iarr, err_one_var_d_i,err_two_var_d_i, cov_one_two_d_i, cov_one_two_d_it,
+	mean_two_i, err_two_var_i, cov_one_two_i,	err_two_var_iarr, cov_one_two_iarr, cov_one_two_iarrt,
+	mean_two_final_i, err_two_final_i, 	  mean_two_d_i1, mean_two_d_i2,
+	mean_two_d_i3, mean_two_d_i4, mean_two_d_i, error_two_final_d_i,var_nc_d_i, mean_nc_d_i, corr_nc_d_i, err_one_var_vech_i, 
+	shi_r_unq_i, errDum, seedn, sq, Error_Tild_d_i, var_nc_d_imat, v_grad_alpha;
+	
+	@nparam is the total number of parameters in the model including the inactive parameters@
+	nparam =  rows(x);  //print "nparam: " nparam;
+ 
+	Alpha_coeff        =  x[1:nvarml]; @structural equation parameters@
+	Chol_Alpha_corr    =  upmat(xpnd(x[nvarml+1:nvarml+nCholOmega])); @Creates a matrix@
+	delta_coeff        =  x[nvarml+nCholOmega+1:nvarml+nCholOmega+nvar_mear]; @Means of measurement equation@
+	d_matrix_coeff     =  x[nvarml+nCholOmega+nvar_mear+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear]; @Factor loadings@
+	Psi_chol           =  diagrv(eye(nvar_mear_cont),(x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont])); @ms eq. error corr.@
+	xbase 			   = x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm]; //Baseline utility parameters
+	Lambda_coeff 	   = x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent]; //Latent variable coefficient into the baseline utility
+	xdel  			   = eqmatdel'*x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent+rows(eqmatdel)]; //Converts the no. of alpha parameters to be estimated to the total no. of alternatives, nc
+	xgam  			   = eqmatgam'*x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent+rows(eqmatdel)+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)];//same as above
+	xcov  			   = upmat(xpnd(x[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear_cont+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)+1:rows(x)])); //Get the cholesky factors
+	
+	
+ Alpha_corr = Chol_Alpha_corr' * Chol_Alpha_corr; //Get the variance-covariance matrix of the latent variable
+ D_matrix   = reshape(d_matrix_coeff,nvar_mear, nvar_latent); //reshape the factor loadings in nvar_mear x nvar_latent format
+ Psi_matrix = Psi_chol' * Psi_chol; //Get the variance-covariance matrix of the indicators
+ Lambda 	= reshape(Lambda_coeff, nc, nvar_latent); //  Reshape the Lambda_coeff into nc by nvar_latent format
+ covn = xcov'*xcov; //xcov is a upper triangular matrix
+ 
+ 
+ AlphaW = (ones(nvar_latent,1) .*. Alpha_coeff  )*~(dta[.,ivl])';
+ z = {}; j = 1;	
+ do until j > nvar_latent;
+	z = z~(sumc(AlphaW[(j-1)*nvarml+1:(j*nvarml),.]));                // Z stores the latent variables value for each observation. nobs X nvar_latent. 1st col has z1, 2nd z2 and so on for all observations.
+    j = j+1;
+endo;
+  
+ @For each measurement equation, factor loading gets mult. by teh latent variable and summed up@
+ y = ((D_matrix * z') + delta_coeff)'; // Y stores the Y variables value for each observation. nobs X nvar_mear. 1st col has Y1, 2nd Y2 and so on for all observations.
+
+//multiply the variables with the appropriate betas for all the alternatives
+ v2 = (ones(nc,1) .*. xbase)*~(dta[.,ivm])';
+ w2 = (ones(nc,1) .*. xdel)*~(dta[.,ivd])'; //For alpha
+ u2 = (ones(nc,1) .*. xgam)*~(dta[.,ivg])'; //For gamma
+
+//Sum the deterministic portion of the utility, alpha and gamma
+ j=1;
+ v = {};
+ w = {};
+ u = {};
+ do until j == nc+1;
+   v = v~(sumc(v2[(j-1)*nvarm+1:(j*nvarm),.]));			// beta*zeta deterministic
+   w = w~(sumc(w2[(j-1)*nvardel+1:(j*nvardel),.]));		// alpha
+   u = u~(sumc(u2[(j-1)*nvargam+1:(j*nvargam),.]));		// gamma
+   j = j+1;
+ endo;
+ //At the end of the loop, v, w and u are nobs x nc matrices
+
+ vv = v + (Lambda * z')'; //Add latent variable into the baseline utility
+ 
+ clear v2,w2,u2;
+ 
+ @Convertion of alpha parameter@
+ a = exp(w);		
+ if _alp0to1;
+   a = 1/(1+exp(w)); 		// a is 1-alpha
+ endif;
+ 
+ @Conversion of gamma parameter@
+ f = exp(u);				// gamma
+ b = dta[.,flagchm] .> 0;	// 1 if chosen, 0 if not //A nobs x nc matrix
+ m = sumc(b');				// number of chosen alternatives  //an nobs x 1 column vector
+  
+ // Identifying alternative mq
+ mq = b.* (seqa(1,1,nc))'; //Convert the 1's into the serial number of the alternatives
+ mq = substute(mq,b.==0,nc+1); //Give a number greater than the total number of alternatives to the unchosen alternatives
+ mq = minc(mq'); //Select the id of the first chosen alternative //mq is a nobs x 1 column vector
+ 
+ //All the matrices in this equation are nobs x nc, must require the use of dot operator
+ Vf = vv-a.*ln((dta[.,flagchm]+f)./f)-ln(dta[.,flagprcm]);	// deterministic component V //An nobs by nc matrix
+
+ //Taking differences w/r to alternative mq
+ cqq = reshape(((seqa(1,1,nc).*.ones(1,nobs)))', nobs*nc, 1 ); //cqq is a column of the seq of alternative numbers repeated nobs times
+ cq = reshape(b, nobs*nc, 1 ); //Convert b into a column, where the seq is the participation indicator for 1st obs then for second observation and so on
+ sel = cqq.*(cqq .!= (mq.*.ones(nc,1)));
+ cq = reshape(selif(cq, cqq .== sel), nobs, nc-1); //cq is b arranged an nobs x (nc- 1) matrix//alternatives are 1 0 with 1 for selected and 0 for non-selected
+ 
+ //Jacobian computation - not dividing by the price of mq, 
+ //Correct if no price variation - need to correct if there is price variation
+ Jac = (a.*b)./((dta[.,flagchm]+f));
+ Jac = Jac./(dta[.,flagprcm]); 
+ Jac = substute(Jac,b.==0,1); //
+ e = (1/Jac).*b;  //nobs x nc matrix
+ d = sumc((e'));//nobs x 1, the summation portion of the Jacobian
+ Jac = (prodc((Jac'))).*d; //An nobs by 1 matrix
+ 
+ U_Y = (y'|Vf')'; //concatenating the continuous indicator and the deterministinc portion of the utility
+ e1   = ( D_matrix * Alpha_corr * D_matrix' + Psi_matrix ); @An nvar_mear x nvar_mear matrix@
+ e12  = ( D_matrix * Alpha_corr * Lambda'); @nvar_mear x nc matrix@
+ e21  = ( Lambda * Alpha_corr * D_matrix'); @nc x nvar_mar matrix@
+ e22  = ( Lambda * Alpha_corr * Lambda' + covn); @nc x nc matrix@
+	   
+ @Full error is a (nvar_mear + nc) x (nvar_mear + nc) matrix@
+ Full_error = (e1~e12);
+ Full_error = Full_error | (e21~e22);
+   
+//Next two code blocks create the M matrix
+ MBig = zeros((nvar_mear+nc-1)*nc,(nvar_mear+nc));
+ iden_matrix = eye(nc-1);
+ one_negative = -ones(nc-1,1);
+ ncDiff = nc-1;
+    
+  for im(1,nc,1);
+	if(im eq 1);
+		Mmat = one_negative ~ iden_matrix; @First column is filled up by -1, the rest of the matrix is filled up by (nc-1) identity matrix@
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+1:((im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont),1:nvar_mear_cont] =eye(nvar_mear_cont);
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont+1:im*(nvar_mear_cont+ncDiff),nvar_mear_cont+1:nvar_mear_cont+nc] = Mmat;
+		clear Mmat;
+	elseif(im eq nc);
+		Mmat = iden_matrix ~ one_negative;	@Last column is filled up by -1, the rest of the matrix is filled up by (nc-1) identity matrix@
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+1:((im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont),1:nvar_mear_cont] =eye(nvar_mear_cont);
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont+1:im*(nvar_mear_cont+ncDiff),nvar_mear_cont+1:nvar_mear_cont+nc] = Mmat;
+		clear Mmat;
+	else;
+		Mmat = iden_matrix[.,1:im-1] ~ one_negative ~ iden_matrix[.,im:nc-1]; @Choice column filled up by -1@
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+1:((im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont),1:nvar_mear_cont] =eye(nvar_mear_cont);
+		MBig[(im-1)*(nvar_mear_cont+ncDiff)+nvar_mear_cont+1:im*(nvar_mear_cont+ncDiff),nvar_mear_cont+1:nvar_mear_cont+nc] = Mmat;
+		clear Mmat;
+	endif;
+endfor;
+ @MBig has been checked for correctness@
+   
+ @NEXT CREATE hj, covj, corrj, om - ALL OF THESE WILL VARY BY WHICH ALTERNATIVE IS CHOSEN@
+ UY_Tild = zeros(nobs,(nvar_mear_cont+nc-1)); @This will hold the differenced mean@
+ Error_Tild = zeros((nvar_mear_cont+nc-1)*(nc),(nvar_mear_cont+nc-1)); @Variance covariance matrix of the differenced error@
+ 
+ mean_one = U_Y[.,1:nvar_mear_cont]; @Does not get affected by the chosen alternative@
+ mean_one_obs = dta[.,ivgenyc];   @The observed values of the continuous indicators@
+ err_one_var_inv = inv(Full_Error[1:nvar_mear_cont,1:nvar_mear_cont]); @inv of the variacne of the continuous indicator error@
+ 
+ mean_two_final = zeros(nobs,(nc-1));	 @This is the mean w/o dividing by the st. errors@	
+ err_two_final = zeros((nc-1)*nc,(nc-1));  @Will hold the conditional variance of utility with respect to continuous indicators@
+ corr_nc = zeros((nc-1)*nc,(nc-1)); @Will hold the correlation matrix corresponding to err_two_final@ 
+ var_nc = zeros(nc,(nc-1)); @Will hold the diagonals of the conditional errors of the alternatives@
+ mean_nc = zeros(nobs, (nc-1)); @Need to be adjusted for the correct alternative chosen, need to be divided by the correct st. error@
+ 
+ @mq is a column vector that holds the first chosen alternative for an individual@
+ @m is a column vector that contains the number of chosen alternatives for an individual@
+ for i(1,nc,1);
+	@Get the M depending on the choice of the alternative@
+	app1 = MBig[(i-1)*(nvar_mear_cont+ncDiff)+1:i*(nvar_mear_cont+ncDiff),.]; @Get the appropriate M depending on which alternative has been chosen@
+	U_Y1 = (app1*U_Y')' *~ (mq .== i); @Utility is a nobs by nc matrix@ @Direct product will have nobs rows and nc columns@
+	UY_Tild = UY_Tild + U_Y1; @This is an nobs by (nc-1), appropriately created depending on which alternative has been chosen@
+	errDiff = app1*Full_error*app1'; @The error difference matrix@
+	Error_Tild[(i-1)*(nvar_mear_cont+ncDiff)+1:i*(nvar_mear_cont+ncDiff),.] = errDiff;
+	
+	@Calculation of conditional mean@
+	mean_two = U_Y1[.,nvar_mear_cont+1:nvar_mear_cont+nc-1]; @Adjuested for the chosen alternative@
+	err_two_var = errDiff[nvar_mear_cont+1:nvar_mear_cont+nc-1,nvar_mear_cont+1:nvar_mear_cont+nc-1]; @Adjusted for the chosen alternative@	 @An nc-1 by nc-1 matrix@
+	cov_one_two = errDiff[nvar_mear_cont+1:nvar_mear_cont+nc-1,1:nvar_mear_cont]; @Correlation matrix adjusted for chosen alternative@
+	mean_two_final = mean_two_final + (mean_two + (cov_one_two * err_one_var_inv * (mean_one_obs - mean_one)')') *~ (mq .== i); @An nobs by nc-1 matrix@
+	clear errDiff;
+	
+	@Calculation of conditional variance@
+	errDiff  = err_two_var - (cov_one_two * err_one_var_inv * cov_one_two'); @This is the conditional error variance covariance matrix adjusted for the chosen alternative@
+	err_two_final[(i-1)*ncDiff+1:i*ncDiff,.] = errDiff;
+	var_nc[i,.] = (diag(errDiff))'; @Diagonal elements of the conditionla error variane covatiance matrix@
+	mean_nc = mean_nc +  ((mean_two_final ./ sqrt(diag(errDiff)')) *~ (mq .== i)); @Making the square root of the error difference a row vector@
+	corr_nc[(i-1)*ncDiff+1:i*ncDiff,.] = diagrv(corrvc(errDiff),ones((nc-1),1));
+	clear U_Y1, errDiff, err_two_var, cov_one_two, mean_two, errDiff;
+endfor;
+ 
+	//GRADIENT WITH RESPECT TO ALPHA - Will effect the mean of the measurement equations as well as the deterministic portion of the utility
+	alpha_coeff_d = eye(nvarml) *~ _max_active[1:nvarml]; @Create nvarml numbers of alpha_score and check for whether the parameter is fixed or not@
+	AlphaWd = (dta[.,ivl])' *~ (ones(nvar_latent,1) .*. alpha_coeff_d); @Has nvarml*nvar_latent rows and nvarml*nobs cols@
+	
+	j = 1;
+	zd = {};	
+	do until j > nvar_latent;
+		zd = zd~(sumc(AlphaWd[(j-1)*nvarml+1:(j*nvarml),.]));			
+		j = j+1;
+	endo; //zd is a (nvarml*nobs) x nvar_latent matrix, each block of nvarml is for one individual
+	
+	yd1 = (D_matrix*zd')'; @yd1 is nvarml*nobs by nvar_mear, each block of nvarml is for one person@
+	v_grad_alpha = (Lambda*zd')'; @v_grad_alpha is nobs*nvarml by nc matrix@
+	
+	Full_error_df = arrayinit((nparam|(nvar_mear_cont+nc)|(nvar_mear_cont+nc)),0); @This will hold the derivative of  the (nvar_mear_cont+nc) by (nvar_mear_cont+nc) full_error with respect to different parameters@
+	err_one_var_vech_ind = zeros(nparam, (nvar_mear)*(nvar_mear+1)/2);
+	
+	d_chol_alpha_corr1 = eye(nCholOmega);
+	//GRADIENT WITH RESPECT TO ALPHA_CORR
+ for ia_corr(1,nCholOmega,1);
+    if (_max_active[nvarml+ia_corr] .== 1);
+			d_chol_alpha_corr = upmat(xpnd(d_chol_alpha_corr1[.,ia_corr]));
+	
+			Alpha_corrd = d_chol_alpha_corr'*Chol_Alpha_corr + Chol_Alpha_corr'*d_chol_alpha_corr;
+					
+			Full_error_d = zeros(nvar_mear_cont+nc, nvar_mear_cont+nc);
+			Full_error_d[1:nvar_mear_cont,1:nvar_mear_cont]   = ( D_matrix * Alpha_corrd * D_matrix' ); @An nvar_mear x nvar_mear matrix@
+			Full_error_d[1:nvar_mear_cont,nvar_mear_cont+1:nvar_mear_cont+nc]  = ( D_matrix * Alpha_corrd * Lambda'); @nvar_mear x nc matrix@
+			Full_error_d[nvar_mear_cont+1:nvar_mear_cont+nc,1:nvar_mear_cont]  = ( Lambda * Alpha_corrd * D_matrix'); @nc x nvar_mar matrix@
+			full_error_d[nvar_mear_cont+1:nvar_mear_cont+nc,nvar_mear_cont+1:nvar_mear_cont+nc]  = ( Lambda * Alpha_corrd * Lambda'); @nc x nc matrix@
+	   
+			err_one_var_vech_ind[nvarml+ia_corr,.] = vech(Full_error_d[1:nvar_mear_cont,1:nvar_mear_cont])';
+			@Full error is a (nvar_mear + nc) x (nvar_mear + nc) matrix@
+			setarray Full_error_df, (nvarml+ia_corr), Full_error_d;
+            clear temp, Alpha_corrd, Full_error_d, d_chol_alpha_corr;					   
+		endif;
+	endfor;
+	
+   //GRADIENT WITH RESPECT TO DElTA
+   delta_coeff_d = eye(nvar_mear_cont) *~ _max_active[nvarml+nCholOmega+1:nvarml+nCholOmega+nvar_mear_cont];
+   yd2 = ones(nobs,1) .*. delta_coeff_d'; @yd2 has nvar_mear_cont*nobs by nvar_mear_cont columns, each nvar_mear block is for one individual@
+   
+   //GRADIENT WITH RESPECT TO FACTOR LOADING
+   @Each row represenst one factor loading derivative@
+   d_matrix_coeff_d = eye(nvar_latent*nvar_mear) *~ _max_active[nvarml+nCholOmega+nvar_mear_cont+1:nvarml+nCholOmega+nvar_mear_cont+nvar_latent*nvar_mear_cont];
+   
+   yd3 = {};
+   for j(1,nvar_mear_cont*nvar_latent,1);
+		D_matrix_d = reshape(d_matrix_coeff_d[.,j],nvar_mear_cont,nvar_latent);
+		yd3 = yd3~(D_matrix_d*z')'; @Concatenating row wise each nobs by nvar_mear matrix@ @Each block of nobs by nvar_mear matrix os for one parameter@
+		Full_error_d = zeros(nvar_mear_cont+nc,nvar_mear_cont+nc);
+		
+		Full_error_d[1:nvar_mear_cont,1:nvar_mear_cont]   = ( D_matrix_d*Alpha_corr*D_matrix' + D_matrix*Alpha_corr*D_matrix_d' ); @An nvar_mear x nvar_mear matrix@
+		Full_error_d[1:nvar_mear_cont,nvar_mear_cont+1:nvar_mear_cont+nc]  = ( D_matrix_d*Alpha_corr*Lambda'); @nvar_mear x nc matrix@
+		Full_error_d[nvar_mear_cont+1:nvar_mear_cont+nc,1:nvar_mear_cont]  = ( Lambda*Alpha_corr*D_matrix_d'); @nc x nvar_mar matrix@
+		
+		err_one_var_vech_ind[nvarml+nCholOmega+nvar_mear+j,.] = vech(Full_error_d[1:nvar_mear_cont,1:nvar_mear_cont])';
+		setarray Full_error_df, (nvarml+nCholOmega+nvar_mear+j), Full_error_d;
+		clear Full_error_d, D_matrix_d;
+	endfor;
+	@Here, yd3 has nobs rows and nvar_mear*(nvar_mear*nvar_latent) cols, Each block of nobs by nvar_mear matrix is for one nvar_mear*nvar_latent parameter@
+       
+   //GRADIENT WRT PSI PARAMETERS
+	d_chol_psi = zeros(nvar_mear_cont,nvar_mear_cont); 						@An nvar_mear_cont by nvar_mear_cont matrix@
+	
+	for j(1,nvar_mear_cont,1); 										
+		if(_max_active[nvarml+nCholOmega+nvar_mear_cont+nvar_latent*nvar_mear_cont+j] .== 1); @Only the diaginals of the cholesky factors are passed@
+				psidd = d_chol_psi;
+				psidd[j,j] = 1;
+				Psid = 2 .*(psidd*Psi_chol); @psi matric is always diagonal, its cholesky factors would always be diagonal too@
+				Full_error_d = zeros(nvar_mear_cont+nc, nvar_mear_cont+nc);
+				Full_error_d[1:nvar_mear_cont,1:nvar_mear_cont] = Psid;
+				
+				err_one_var_vech_ind[nvarml+nCholOmega+nvar_mear+nvar_mear_cont*nvar_latent+j,.] = vech(Full_error_d[1:nvar_mear_cont,1:nvar_mear_cont])';
+				setarray Full_error_df, (nvarml+nCholOmega+nvar_mear+nvar_mear_cont*nvar_latent+j), Full_error_d;
+				clear psidd, Psid, Full_error_d;
+			endif; @If the parameter is not active, need not do anything@
+	endfor;
+ 
+ //GRADIENT WITH RESPECT TO BETA
+ xbase_d = eye(nvarm) *~ _max_active[nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear+1:nvarml+nCholOmega+nvar_mear+nvar_latent*nvar_mear+nvar_mear+nvarm];
+ xbase_d = (ones(nc,1) .*. xbase_d); @Repeating each block of nvarm parameters nc times@
+ v2_grad = (dta[.,ivm])' *~ xbase_d; @v2_d has nvarm *nc rows and nvarm*nobs columns@
+ 
+ //GRADIENT WITH RESPECT TO GAMMA, ONLY AFFECTS THE DETERMINISTIC PORTION OF THE UTILITY AS WELL AS THE JACOBIAN
+ gamma_score = eye(rows(eqmatgam)) *~ _max_active[nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+nc*nvar_latent+rows(eqmatdel)+1:nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)]; @Each column corresponds to the derivative with respect to one gamma@ @Also multiply by _max_active to make the ones zero that are not active@
+ gamma_score = eqmatgam'*gamma_score; @Converting it from number of parameters to number of alternatives@ @In case eqmatgam is eye there is no effect@
+ xgam_grad = ones(nc,1) .*. gamma_score; @Repeating the block of gamma score nc times@
+ u2_grad = dta[.,ivg]' *~ xgam_grad; @u2_grad will have nvargam*nc rows and nvargam*nobs columns@
+ 
+ /**************************************************************************************************************************/
+ j = 1;
+ v_grad = {};	
+ u_grad = {};
+ do until j == nc+1;
+	v_grad = v_grad~(sumc(v2_grad[(j-1)*nvarm+1:(j*nvarm),.]));			// beta*zeta deterministic
+	u_grad = u_grad~(sumc(u2_grad[(j-1)*nvargam+1:(j*nvargam),.]));
+	j = j+1;
+endo; 
+//v_grad is a (nvarm*nobs) rows, each chunk of nvarm rows for one nvarm parameters and nc columns
+//u_grad is a (nvargam*nobs) rows, each chunk of nvargam rows for one gamma parameter and nc columns 	  
+  v_gradG = (((dta[.,flagchm].*a).*.ones(nvargam,1)).*u_grad)./((dta[.,flagchm]+f).*.ones(nvargam,1)); @v_gradG i s a nvargam*nobs by nc matrix@
+  
+  //CALCULATION OF GRADIENT OF THE JACOBIAN
+  //WITH RESPECT TO GAMMA PARAMETERS
+  f_grad = (f .*. ones(nvargam,1)).*u_grad; //An (nvargam*nobs) x nc matrix @This is the gradient of u wrt gamma parameters@
+  
+  jac_grad1 = sumc(((-f_grad./((dta[.,flagchm]+f).*.ones(nvargam,1))).*(b.*.ones(nvargam,1)))'); //An (nvargam*nobs) x 1 matrix
+  jac_grad2_top = sumc(((f_grad./(a.*.ones(nvargam,1))).*(b.*.ones(nvargam,1)))'); //(nvargam*nobs) x 1 matrix
+  jac_grad2_bottom = (sumc((((dta[.,flagchm]+f)./a).*b)')).*.ones(nvargam,1); //(nvargam*nobs) x 1 matrix
+  jac_grad2 = jac_grad2_top ./ jac_grad2_bottom; //(nvargam*nobs) x 1 matrix
+  jac_gradG = jac_grad1 + jac_grad2; //(nvargam*nobs) x 1 matrix
+  jac_gradG = reshape(jac_gradG, nobs, nvargam); @Making it a nobs by nvargam matrix@	
+  @jac_grad holds the gradient of the ln of the jacobian with respect to u, which is the parameter underlying the gamma parameter@
+  clear jac_grad1, jac_grad2_top, jac_grad2_bottom, jac_grad2;
+  @jac_gradG is a nobs by nvargam matrix, each row represent derivative of jacobian for one individual@
+ 
+ //GRADIENT WITH RESPECT TO LAMBDA
+ lambda_coeff_d = eye(nc*nvar_latent) *~ _max_active[nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+1:nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+nc*nvar_latent];
+ 
+ v_grad2 = {};
+ for j(1,nc*nvar_latent,1);
+	lambda_mat_d = reshape(lambda_coeff_d[.,j],nc,nvar_latent);
+	v_grad2 = v_grad2~(lambda_mat_d*z')'; @Concatenating column wise each nobs by nc matrix@ @Each block of nobs by nc is for one parameter@
+	Full_error_d = zeros(nvar_mear_cont+nc,nvar_mear_cont+nc);
+	Full_error_d[1:nvar_mear_cont,nvar_mear_cont+1:nvar_mear_cont+nc]  = ( D_matrix*Alpha_corr*lambda_mat_d' ); @nvar_mear x nc matrix@
+	Full_error_d[nvar_mear_cont+1:nvar_mear_cont+nc,1:nvar_mear_cont]  =  (lambda_mat_d*Alpha_corr*D_matrix'); @nc x nvar_mar matrix@
+	Full_error_d[nvar_mear_cont+1:nvar_mear_cont+nc,nvar_mear_cont+1:nvar_mear_cont+nc]  = ( lambda_mat_d*Alpha_corr*Lambda' + Lambda*Alpha_corr*lambda_mat_d'); @nc x nc matrix@
+	
+	@Not entering anything into err_one_var_vech, since it would be zero@
+	setarray Full_error_df, (nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+j), Full_error_d;
+	clear Full_error_d, lambda_mat_d;
+endfor;
+@v_grad2 is a nobs by nc*(nc*nvar_latent) matrix, where each nobs by nc block is the derivative with respct one nc*nvar_latent parameter@
+
+
+//GRADIENT WITH RESPECT TO COVN
+ covn_chol_dd1 = eye(ncov) *~ _max_active[nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)+1:nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)+ncov];
+
+ for j(1,ncov,1);
+	covn_chol_dd = upmat(xpnd(covn_chol_dd1[.,j]));  
+	covn_dd = covn_chol_dd'*xcov +  xcov'*covn_chol_dd;
+	Full_error_d = zeros(nvar_mear_cont+nc,nvar_mear_cont+nc);
+	Full_error_d[nvar_mear_cont+1:nvar_mear_cont+nc,nvar_mear_cont+1:nvar_mear_cont+nc] = covn_dd;
+	
+	@Here also not enterinng anything into err_one_var_vech, since it would be zero@
+	setarray Full_error_df, (nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)+j), Full_error_d;
+	clear covn_dd, Full_error_d;
+endfor;
+
+
+ 
+//JOIN yd1, yd2, AND yd3 - MAKE A NOBS*NPARAM BY NVAR_MEAR_CONT MATRIX
+	yd11 = reshape(yd1, nobs, nvar_mear*nvarml); @Derivative wrt alpha@
+	yd22 = reshape(yd2, nobs, nvar_mear*nvar_mear); @Derivative wrt delta@
+	@yd should be a nparam*nobs by nvar_mear matrix@
+	yd = yd11~zeros(nobs,nvar_mear*ncholOmega)~yd22~yd3~zeros(nobs,nvar_mear*(nvar_mear+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)+ncov));
+	yd = reshape(yd,nparam*nobs,nvar_mear); @yd3 contains the derivative wrt factor loadings@
+	@yd contains the derivative wrt alpha, delta and factor loading@
+    
+ //JOIN v_grad, v_grad2 and jac_gradG - MAKE NOBS*NPARAM BY NC MATRIX
+ v_grad = reshape(v_grad, nobs, nc*nvarm); @Derivative with respect to beta parameters@
+ v_gradG = reshape(v_gradG, nobs, nc*nvargam); @Derivative with respect to gamma parameters@ 
+ v_grad_alpha = reshape(v_grad_alpha, nobs, nc*nvarml); @Derivative with respect to alpha parameters@
+ @U_grad should be a nparam*nobs by nc matrix@
+ Vf_grad = v_grad_alpha~zeros(nobs, nc*(nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear))~v_grad~v_grad2~zeros(nobs,nc*rows(eqmatdel))~v_gradG~zeros(nobs,nc*ncov); @v_grad2 is the derivative wrt lamnda, coefficient to latent variables@
+ Vf_grad = reshape(Vf_grad, (nparam)*nobs, nc); @U_grad holds the derivative @ 
+ 
+ U_Yd = yd~Vf_grad; @An nobs*nparam by nvar_mear_cont+nc matrix@  
+ //print "yd: " yd[1:nvarml,.];
+ 
+ 
+/************END OF CREATION OF ALL THE GRADIENT********************************************************/
+/********************************************************************************************************/
+
+ @Take the active parameters applicable for the parameters in the error variance covariance matrix@	
+ activeN = zeros(nvarml,1)|ones(nCholOmega,1)|
+		   zeros(nvar_mear,1)|ones(nvar_mear*nvar_latent,1)|ones(nvar_mear,1)|
+		   zeros(nvarm,1)|ones(nc*nvar_latent,1)|
+		   zeros(rows(eqmatdel),1)|zeros(rows(eqmatgam),1)|
+		   ones(ncov,1);
+ activeN = activeN .* _max_active; 
+
+
+ @Creating arrays required to calculate the conditoinal means@
+ mean_one_obs_arr = areshape(mean_one_obs',nparam|nvar_mear_cont|nobs); @Does not need to take any difference, nparam by nvar_mear_cont by nobs array@
+ mean_one_arr = areshape(mean_one',nparam|nvar_mear_cont|nobs); @Does not need to take any difference, nparam by nvar_mear_cont by nobs array@
+ mean_one_d = areshape(yd,nobs|nparam|nvar_mear_cont); @First making it an array where each nobs-th block is an nparam by nvar_mear matrix@
+ mean_one_d = atranspose(mean_one_d,2|1|3); @mean_one_d is a nparam by nobs by nvar_mear array@
+ mean_one_d = atranspose(mean_one_d,1|3|2); @Now mean_one_d is a nparam by nvar_mear by nobs array@
+ 
+ err_one_var = Full_error[1:nvar_mear,1:nvar_mear]; @Does not need to take difference@
+ err_one_var_arr = areshape(err_one_var,nparam|nvar_mear_cont|nvar_mear_cont); 
+ err_one_var_inv_arr = areshape(err_one_var_inv,nparam|nvar_mear_cont|nvar_mear_cont);
+ err_one_var_d = Full_error_df[.,1:nvar_mear_cont, 1:nvar_mear_cont]; @This is a nparam by nvar_mear by nvar_mear array@
+ 
+ UY_Tild_d = zeros(nparam*nobs,(nvar_mear_cont+nc-1)); @Need to be adjusted wrt the chosen alternative@
+ mean_two_d = zeros(nparam*nobs,nc-1); @Will hold the gradient of the conditional mean of the unchosen alternatives@
+ mean_nc_d = zeros(nparam*nobs,(nc-1)); @This will hold the final conditional mean of the alternatives@
+ Error_Tild_d = arrayinit(nc|nparam|(nvar_mear_cont+nc-1)|(nvar_mear_cont+nc-1),0); @Need to take differenc of Full_error_df, depending on which alternative is chosen@
+ err_one_var_vech = zeros(nc*nparam,(nvar_mear_cont+ncDiff)*(nvar_mear_cont+nc)/2); @The array to hold the full nvar_mear_cont+nc-1 vech with respect to the chosen alternative@
+ shi_r_unq = zeros(nc*nparam,(ncDiff)*(ncDiff-1)/2); @Will hold the derivative of the correlation parameters @
+ 
+ 
+ for i(1,nc,1);
+	 app1 = MBig[(i-1)*(nvar_mear_cont+ncDiff)+1:i*(nvar_mear_cont+ncDiff),.]; @Get the appropriate M depending on which alternative has been chosen@
+     UY_Tild_d1 = (app1*U_Yd')' *~ ((mq .*. ones(nparam,1)) .== i); @U_Yd is a nparam*nobs by nvar_mear+nc matrix@
+	 UY_Tild_d = UY_Tild_d + UY_Tild_d1; //UY_Tild_d is a nobs*nparam by nvar_mear + (nc-1) matrix
+	 @UY_Tild_d is the utility differenced with respect to the chosen alternative@
+	 
+	 app1 = areshape(app1,nparam|(nvar_mear_cont+nc-1)|(nvar_mear_cont+nc)); @Making the M matrix an array, to take the difference of the error variance, covariance@
+	 errDiff_d1 = amult(amult(app1,Full_error_df),atranspose(app1,1|3|2)); @Full_error_df is nparam by nvar_mear+nc by nvar_mear+nc@
+	 
+	 setarray Error_Tild_d, i, errDiff_d1; @In the ith position Error_Tild holds the nparam by (nvar_mear+nc-1) by (nvar_mear+nc-1) array@
+     clear app1;
+
+	@Calculation of the conditional mean@
+	Error_Tild_i = Error_Tild[(i-1)*(nvar_mear_cont+ncDiff)+1:i*(nvar_mear_cont+ncDiff),.]; @Taking the appropriate Error_Tild matrix depending on the chosen alternative@
+	err_two_var = Error_Tild_i[nvar_mear_cont+1:nvar_mear_cont+nc-1,nvar_mear_cont+1:nvar_mear_cont+nc-1]; @nc-1 by nc-1 matrix@
+	cov_one_two = Error_Tild_i[nvar_mear_cont+1:nvar_mear_cont+nc-1,1:nvar_mear_cont]; @nc-1 by nvar_mear_cont matrix@
+    clear Error_Tild_i;	
+	
+	err_two_var_arr = areshape(err_two_var, nparam|(nc-1)|(nc-1));        @Making nrapam by (nc-1) by (nc-1) array@
+	cov_one_two_arr = areshape(cov_one_two, nparam|(nc-1)|nvar_mear_cont); @Making nparam by (nc-1) by nvar_mear array@
+	cov_one_two_arrt = atranspose(cov_one_two_arr,1|3|2);
+	
+	@These error gradient matrices are nparam by ... by ... array@
+	err_two_var_d = errDiff_d1[.,nvar_mear_cont+1:nvar_mear_cont+nc-1,nvar_mear_cont+1:nvar_mear_cont+nc-1]; @err_two_var_d is a nparam by nc-1 by nc-1 array@
+	cov_one_two_d = errDiff_d1[.,nvar_mear_cont+1:nvar_mear_cont+nc-1,1:nvar_mear_cont]; @cov_one_two_d is a nparam by nc-1 by nvar_mear_cont array@
+	cov_one_two_d_t = atranspose(cov_one_two_d,1|3|2);
+
+	@mean_two_d will have four parts -  we will calculate the four parts seperately here@
+	mean_two_d1 = UY_Tild_d1[.,nvar_mear_cont+1:nvar_mear_cont+nc-1]; @This is a nparam*nobs by nc-1 matrix@
+	
+	mean_two_d2 = atranspose((amult((amult(cov_one_two_d,err_one_var_inv_arr)),(mean_one_obs_arr-mean_one_arr))),1|3|2); @mean_two_d is a nparam by nobs by (nc-1) array@
+	mean_two_d2 = arraytomat(areshape((atranspose(mean_two_d2,2|1|3)),1|(nparam*nobs)|(nc-1))); @mean_two_d2 is a nparam*nobs by (nc-1) matrix@
+	
+	mean_two_d3 = atranspose((amult((amult((amult((amult(cov_one_two_arr,err_one_var_inv_arr)),err_one_var_d)),err_one_var_inv_arr)),(mean_one_obs_arr-mean_one_arr))),1|3|2); @This is a nparam by nobs by (nc-1) array@
+	mean_two_d3 = arraytomat(areshape((atranspose(mean_two_d3,2|1|3)),1|(nparam*nobs)|(nc-1))); @mean_two_d3 is a nparam*nobs by (nc-1) matrix@			 
+	
+	mean_two_d4 = atranspose((amult(amult(cov_one_two_arr,err_one_var_inv_arr),(-mean_one_d))),1|3|2) ; @mean_two_d4 is a nparam by nobs by (nc-1) array@
+ 	mean_two_d4 = arraytomat(areshape((atranspose(mean_two_d4,2|1|3)),1|(nparam*nobs)|(nc-1))); @mean_two_d4 is a nparam*nobs by (nc-1) matrix@			 
+	
+    mean_two_df  = ((mean_two_d1+mean_two_d2-mean_two_d3+mean_two_d4) *~ ((mq .*. ones(nparam,1)) .== i));	
+	mean_two_d = mean_two_d + mean_two_df;	@Adjusted for the chosen alternative@ 
+    clear mean_two_d1, mean_two_d2, mean_two_d3, mean_two_d4;
+	
+	@Conditional error variance covariance matrix@
+	err_two_final_d = err_two_var_d 
+				- amult((amult(cov_one_two_d,err_one_var_inv_arr)),cov_one_two_arrt)
+	            + amult((amult((amult((amult(cov_one_two_arr,err_one_var_inv_arr)),err_one_var_d)),err_one_var_inv_arr)),cov_one_two_arrt)
+				- amult((amult(cov_one_two_arr,err_one_var_inv_arr)),cov_one_two_d_t); @This is nparam by (nc-1) by (nc-1)@
+	err_two_final_iarr = areshape(err_two_final[(i-1)*ncDiff+1:i*ncDiff,.],nparam|(nc-1)|(nc-1));
+	
+	@Conditional diagonals and gradient of diagonals@
+	var_nc_i = var_nc[i,.];  @This is the variance of the condtional error of the chosen alternatives@
+	var_nc_iarr = areshape(var_nc_i',nparam|(nc-1)|1); @Making the diagonal a column element@
+	var_nc_d = diag(err_two_final_d); @This is a nparam by (nc-1) by 1 array@ @holds the gradient of the variance of the conditional variance of the alternatives@
+	corr_nc_d = (atranspose((err_two_final_d./sqrt(var_nc_iarr)),1|3|2)./sqrt(var_nc_iarr)) - 0.5 .* ((atranspose(((err_two_final_iarr ./(sqrt(var_nc_iarr).*(var_nc_iarr))) .* var_nc_d ),1|3|2) ./(sqrt(var_nc_iarr)))   + ((atranspose((err_two_final_iarr ./(sqrt(var_nc_iarr))),1|3|2) ./(sqrt(var_nc_iarr).*var_nc_iarr)) .* var_nc_d )) ;
+	
+	@Calculating the gradient of mean_nc_d, that is mean_two_final divided by the standard error@	
+	mean_nc_d1 = mean_two_df./sqrt(var_nc_i); @Gradient for the first part - an nobs*nparam by (nc-1) matrix@ 
+	var_nc_dmat = arraytomat(areshape(var_nc_d,nparam|(nc-1)));
+	mean_nc_d2 = 0.5 .*(((mean_two_final *~(mq .== i)).*.ones(nparam,1)).*(ones(nobs,1) .*. var_nc_dmat))./(sqrt(var_nc_i).*var_nc_i); @mean_nc_d2 is a nparam*nobs by (nc-1) matrix@
+	mean_nc_d = mean_nc_d + ((-mean_nc_d1 + mean_nc_d2) *~ ((mq .*. ones(nparam,1)) .== i));
+	clear mean_nc_d1, mean_nc_d2, mean_two_df;
+	
+	for j(1,nparam,1);
+		if(activeN[j] .== 1);
+			err_one_var_vech[(i-1)*nparam+j,.] = vech(arraytomat(areshape(getarray(errDiff_d1,j),(nvar_mear_cont+nc-1)|(nvar_mear_cont+nc-1))))';
+			shi_r_unq[(i-1)*nparam+j,.] = (packr(vecr(arraytomat(getarray(corr_nc_d,j))) + vecr(miss(lowmat(reshape(99999,(nc-1),(nc-1))),99999))))';			
+		endif;
+	endfor;
+	clear errDiff_d1, err_two_var, cov_one_two, err_two_var_arr, cov_one_two_arr, cov_one_two_arrt, err_two_var_d, cov_one_two_d, cov_one_two_d_t,
+		  err_two_final_d, err_two_final_iarr, var_nc_i, var_nc_iarr, var_nc_d, corr_nc_d, var_nc_dmat;
+endfor;
+
+ 
+//BEGIN LOOPING THROUGH THE INDIVIDUAL//
+ seedn = seednext; //A different seed is used for each individual, across iterations the seed remain the same
+ sq = seedn;
+ 
+ gg = zeros(nobs, nparam);
+ j=1;//Begining of the loop through the individual
+ do while j <= nobs;
+	if m[j]==1;
+		mean_one_i = UY_Tild[j,1:nvar_mear_cont]'; @Needs to be a column vector@
+		mean_one_obs_i = (dta[j,ivgenyc])';
+		err_one_var_i = Full_Error[1:nvar_mear_cont,1:nvar_mear_cont]; @Taking difference does not have any effect on this error var matrix@ @Full_error is a nvar_mear_cont by nvar_mear_cont matrix@
+	
+		mean_nc_i = -mean_nc[j,.]; @Mean divided by standard deviation@ @This is a row vector@
+		corr_nc_i = corr_nc[(mq[j]-1)*ncDiff+1:mq[j]*ncDiff,.]; @The conditional correlation matrix@
+		
+		p1 = pdfmvn(mean_one_obs_i,mean_one_i,err_one_var_i); @joint normal pdf calculation of the continuous indicators@
+		p1_grad_mean = pdfgmean( mean_one_obs_i,mean_one_i,err_one_var_i); @Returns column matrix@
+		p1_grad_cov = pdfgcov(mean_one_obs_i,mean_one_i,vech(err_one_var_i)); @Returnd column matrix@
+		p1_dd = (1/p1) .* ((p1_grad_mean' * (-yd[(j-1)*nparam+1:j*nparam,.])')
+						   + (p1_grad_cov' * err_one_var_vech_ind')); @This is a 1 by nparam vector@	
+		
+		if(nc-1 == 2);
+			p3 = cdfbvn(mean_nc_i[1], mean_nc_i[2], corr_nc_i[1,2]);
+			p3_grad = cdfbvn_grad(mean_nc_i[1], mean_nc_i[2], corr_nc_i[1,2]);
+			p3_grad = p3_grad';
+		else;
+			{ p3,p3_grad, sq } = pdfmvna(mean_nc_i,corr_nc_i,seedn); @p3_grad is a row vector@	 
+		endif;
+		
+		p3_dd = (1/p3) .* ((p3_grad[1:(nc-1)] * mean_nc_d[(j-1)*nparam+1:j*nparam,.]')
+							+ (p3_grad[nc:cols(p3_grad)] * shi_r_unq[(mq[j]-1)*nparam+1:mq[j]*nparam,.]'));
+		gg[j,.] = p1_dd+p3_dd;
+		
+		clear mean_one_i, mean_one_obs_i, err_one_var_i, mean_nc_i, corr_nc_i, p1, p3, p1_grad_mean, p1_grad_cov;		
+		clear p3_grad, p3_dd, p1_dd;
+		
+	// Case 2: only interior soultions - all the available alternatives are chosen - only a joint normal pdf needs to be calculated
+	elseif m[j] == nc;
+		mean_one_i = UY_Tild[j,.]'; @Need to be a column vector for passing into pdfmvn@
+		mean_one_obs_i = (dta[j,ivgenyc])'|zeros((nc-1),1);
+		err_one_var_i = Error_Tild[(mq[j]-1)*(nvar_mear_cont+ncDiff)+1:mq[j]*(nvar_mear_cont+ncDiff),.];
+		
+		p1 = pdfmvn(mean_one_obs_i, mean_one_i, err_one_var_i); @Calculation of the joint normal pdf@
+		p1_grad_mean = pdfgmean(mean_one_obs_i, mean_one_i, err_one_var_i); @Returns a column vector@
+		p1_grad_cov = pdfgcov(mean_one_obs_i, mean_one_i, vech(err_one_var_i )); @Returns a column vector@
+		p1_dd = (1/p1) .* ((p1_grad_mean' * (-UY_Tild_d[(j-1)*nparam+1:j*nparam,.])')
+						+ (p1_grad_cov' * err_one_var_vech[(mq[j]-1)*nparam+1:mq[j]*nparam,.]')); @This is a 1 by @
+		
+		gg[j,.] = p1_dd;
+		
+		clear mean_one_i, mean_one_obs_i, err_one_var_i;
+		clear p1, p1_grad_mean, p1_grad_cov, p1_dd;
+		// Case 3: corner and interior solutions - both the joint normal pdf and joint normal cdf need to be calculated
+	else;
+		ch = seqa((nvar_mear_cont+1),1,nc-1)' .* cq[j,.];
+		ch = selif(ch',(ch' .!=0))'; @ch is a row vector@  
+		mear_ch = seqa(1,1,nvar_mear_cont)'~ch; 
+		nch = seqa((nvar_mear_cont+1),1,(nc-1))' .* (cq[j,.].==0); 
+		nch = selif(nch',(nch' .!=0))'; @nch is a row vector too@
+		Error_Tild_i = Error_Tild[(mq[j]-1)*(nvar_mear_cont+ncDiff)+1:mq[j]*(nvar_mear_cont+ncDiff),.]; @Taking the error difference matrix adjusted by the chosen alternative@
+		
+		mean_one_i = UY_Tild[j,mear_ch]'; //Contains the continuous indicators and deterministic portion of the utility for the chosen alternatives without mq in a column vector 
+		mean_one_obs_i = (dta[j,ivgenyc])'|(zeros(cols(ch),1)); @Reported values of the continuous indicators@
+		err_one_var_i = Error_Tild_i[mear_ch,mear_ch]; @Variance-covariance matrix of the continuous indicators and the chosen alternatives@
+		err_one_var_inv_i = inv(err_one_var_i);
+		err_one_var_inv_iarr = areshape(err_one_var_inv_i,nparam|cols(mear_ch)|cols(mear_ch));
+		
+		mean_one_d_i = UY_Tild_d[(j-1)*nparam+1:j*nparam,mear_ch]; 
+		mean_one_d_iarr = areshape(mean_one_d_i,nparam|cols(mear_ch)|1); @This is a nparam by cols(mear_ch) by 1 array@
+		
+		Error_Tild_d_i = areshape(getarray(Error_Tild_d,mq[j]),nparam|nvar_mear_cont+nc-1|nvar_mear_cont+nc-1); @This is a nparam by nvar_mear_cont +nc - 1 by nvar_mear_cont+nc - 1 array@
+		err_one_var_d_i = Error_Tild_d_i[.,mear_ch,mear_ch];
+		err_two_var_d_i = Error_Tild_d_i[.,nch,nch];
+		cov_one_two_d_i = Error_Tild_d_i[.,nch,mear_ch];
+		cov_one_two_d_it = atranspose(cov_one_two_d_i,1|3|2);
+		
+		@Calcualtion of conditional mean and conditional variance@	
+		mean_two_i = UY_Tild[j,nch]'; //Making it a column vector
+		err_two_var_i = Error_Tild_i[nch,nch]; @variance-covariance matrix of the non-chosen alternatives@
+		cov_one_two_i = Error_Tild_i[nch,mear_ch]; @The covariance matrix@
+		
+		err_two_var_iarr = areshape(err_two_var_i, nparam|cols(nch)|cols(nch));
+		cov_one_two_iarr = areshape(cov_one_two_i, nparam|cols(nch)|cols(mear_ch));
+	    cov_one_two_iarrt = areshape(cov_one_two_i', nparam|cols(mear_ch)|cols(nch));
+		
+		mean_two_final_i = mean_two_i + cov_one_two_i * err_one_var_inv_i * (mean_one_obs_i - mean_one_i); @Conditional mean of the non-chosen alternatives@
+		err_two_final_i = err_two_var_i - (cov_one_two_i * err_one_var_inv_i * cov_one_two_i');  @conditional variance-covariance of the non-chsen alternatives@
+	    err_two_final_iarr = areshape(err_two_final_i,nparam|cols(nch)|cols(nch)); 	
+		
+		mean_nc_i = -(mean_two_final_i)./sqrt(diag(err_two_final_i)); @Both are column matrices@
+		corr_nc_i = diagrv(corrvc(err_two_final_i), ones(cols(nch),1));
+				
+		//CALCULATION OF GRADIENT	 OF THE MEAN	
+		mean_two_d_i1 = UY_Tild_d[(j-1)*nparam+1:j*nparam,nch]; @This is a nparam by nch matrix@ 
+			
+		//mean_two_d_i2 is a nparam by nch by 1 array, transpose to make it 1 by nch by nparam
+		mean_two_d_i2 = amult((amult(cov_one_two_d_i,err_one_var_inv_iarr)), (areshape((mean_one_obs_i - mean_one_i),nparam|cols(mear_ch)|1)));
+		mean_two_d_i2 = arraytomat(areshape(atranspose(mean_two_d_i2,3|2|1),cols(nch)|nparam)); @Finally it is a nch by nparam matrix@   
+		
+		mean_two_d_i3 = amult((amult(cov_one_two_iarr,(amult((amult(err_one_var_inv_iarr,err_one_var_d_i)), err_one_var_inv_iarr)))),(areshape((mean_one_obs_i - mean_one_i),nparam|cols(mear_ch)|1)));
+		mean_two_d_i3 = arraytomat(areshape(atranspose(mean_two_d_i3,3|2|1),cols(nch)|nparam)); @Finally it is a nch by nparam matrix@   
+		
+		mean_two_d_i4 = amult((amult(cov_one_two_iarr,err_one_var_inv_iarr)),(-mean_one_d_iarr));
+		mean_two_d_i4 = arraytomat(areshape(atranspose(mean_two_d_i4,3|2|1),cols(nch)|nparam)); @Finally it is a nparam by nch matrix@   
+		
+		mean_two_d_i = mean_two_d_i1 + mean_two_d_i2' - mean_two_d_i3' + mean_two_d_i4'; @This is nparam by cols(nch)@
+		
+		//CALCULATION OF GRADIENT OF THE ERROR
+		var_nc_i = diag(err_two_final_i)'; @This is a row vector of size cols(nch)@
+		var_nc_iarr = areshape(var_nc_i,nparam|cols(nch)|1);  @This is a nparam by cols(nch) by 1 array@
+		error_two_final_d_i = err_two_var_d_i -
+							  amult((amult(cov_one_two_d_i,err_one_var_inv_iarr)),cov_one_two_iarrt) + 
+							  amult((amult(cov_one_two_iarr,(amult((amult(err_one_var_inv_iarr, err_one_var_d_i)),err_one_var_inv_iarr)))), cov_one_two_iarrt) -
+							  amult((amult(cov_one_two_iarr,err_one_var_inv_iarr)), cov_one_two_d_it); @This is nparam by nch by nch array@
+		var_nc_d_i = diag(error_two_final_d_i); @This is nparam by cols(nch) by 1@
+		var_nc_d_imat = (arraytomat((areshape(atranspose(var_nc_d_i,3|2|1),cols(nch)|nparam))))'; @Finally this is nparam by nch@
+		
+		mean_nc_d_i = -mean_two_d_i./sqrt(var_nc_i) + 0.5 .*((((mean_two_final_i' .*. ones(nparam,1)).*var_nc_d_imat))./(sqrt(var_nc_i).*var_nc_i)); @mean_nc_d_i is nparam by nch matrix@
+		corr_nc_d_i = (atranspose((error_two_final_d_i./sqrt(var_nc_iarr)),1|3|2)./sqrt(var_nc_iarr)) - 
+		0.5 .* ((atranspose(((err_two_final_iarr ./(sqrt(var_nc_iarr).*(var_nc_iarr))) .* var_nc_d_i ),1|3|2) ./(sqrt(var_nc_iarr)))   + 
+		((atranspose((err_two_final_iarr ./(sqrt(var_nc_iarr))),1|3|2) ./(sqrt(var_nc_iarr).*var_nc_iarr)) .* var_nc_d_i )) ;
+		
+		@Create vech_i and shi_r_unq_i@
+		err_one_var_vech_i = zeros(nparam,cols(mear_ch)*(cols(mear_ch)+1)/2);
+	    if (cols(nch) > 1);
+			shi_r_unq_i = zeros(nparam,cols(nch)*(cols(nch)-1)/2);
+		endif;
+		for i(1,nparam,1);
+			if(activeN[i] .== 0);
+			else;
+				errDum = arraytomat(areshape(getarray(err_one_var_d_i,i),cols(mear_ch)|cols(mear_ch))); @@
+				err_one_var_vech_i[i,.] = vech(errDum)';
+				if(cols(nch) > 1);
+					shi_r_unq_i[i,.] = (packr(vecr(arraytomat(getarray(corr_nc_d_i,i))) + vecr(miss(lowmat(reshape(99999,cols(nch),cols(nch))),99999))))';
+				endif;
+				clear errDum;
+			endif;
+		endfor;
+		
+		@Calculation of gradient of the pdf@
+		p1 = pdfmvn(mean_one_obs_i, mean_one_i, err_one_var_i);//The joint normal pdf of the chosen alternatives without mq
+		p1_grad_mean = pdfgmean(mean_one_obs_i, mean_one_i, err_one_var_i); @Returns column vector@
+	    p1_grad_cov = pdfgcov(mean_one_obs_i, mean_one_i, vech(err_one_var_i));
+		p1_dd = (1/p1) .* ((p1_grad_mean' * (-mean_one_d_i)')
+		                  + (p1_grad_cov' * err_one_var_vech_i'));
+	
+		@Calculation of gradient of the cdf@
+		if(cols(nch) == 1);
+			p3 = cdfn(mean_nc_i);
+			p3_grad = pdfn(mean_nc_i);
+			
+		elseif(cols(nch)==2);
+			p3 = cdfbvn(mean_nc_i[1], mean_nc_i[2],corr_nc_i[1,2]);
+			p3_grad = cdfbvn_grad(mean_nc_i[1], mean_nc_i[2],corr_nc_i[1,2]); @Returns a column vector@
+			p3_grad = p3_grad';
+		else;
+			{ p3,p3_grad,sq } = pdfmvna(mean_nc_i',corr_nc_i,seedn);	
+		endif;
+		
+
+		if (cols(nch) ==1); 
+			p3_dd = (1/p3) .* (p3_grad * mean_nc_d_i') ;
+		else;			
+			p3_dd = (1/p3) .* ((p3_grad[1:cols(nch)] * mean_nc_d_i') 
+					+ (p3_grad[cols(nch)+1:cols(p3_grad)] * shi_r_unq_i')); 
+		endif;
+	
+        gg[j,.] = (p1_dd + p3_dd)	; @This is a 1 by nparam row@
+		
+		clear ch, mear_ch, nch, Error_Tild_i, mean_one_i, mean_one_obs_i, err_one_var_i, mean_two_i, err_two_var_i,
+		cov_one_two_i, mean_two_final_i, err_two_final_i, mean_nc_i, corr_nc_i, err_one_var_inv_i, err_one_var_inv_iarr, 
+		mean_one_d_i, mean_one_d_iarr, Error_Tild_d_i, err_one_var_d_i, err_two_var_d_i,
+		cov_one_two_d_i, cov_one_two_d_it,mean_two_i, err_two_var_iarr, cov_one_two_iarr, cov_one_two_iarrt, 
+		err_two_final_iarr, mean_two_d_i1, mean_two_d_i2, mean_two_d_i3, mean_two_d_i4, mean_two_d_i, var_nc_iarr, error_two_final_d_i,
+		var_nc_d_i, mean_nc_d_i, corr_nc_d_i, err_one_var_vech_i, shi_r_unq_i, errDum, p1, p1_grad_mean,
+		p1_grad_cov, p1_dd, p3, p3_grad, p3_dd;
+		
+	endif; @End of check for how many alternatives have been consumed@
+	seedn = sq;
+	j = j + 1;
+endo; @End of looping for individual@
+
+ gradient = gg[.,1:nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+nc*nvar_latent+rows(eqmatdel)] ~
+(jac_gradG + gg[.,nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+nc*nvar_latent+rows(eqmatdel)+1:nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)])
+~ gg[.,nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)+1:nvarml+nCholOmega+nvar_mear+nvar_mear*nvar_latent+nvar_mear+nvarm+nc*nvar_latent+rows(eqmatdel)+rows(eqmatgam)+ncov];
+
+			
+ 		
+ gradient = gradient *~ post_obs;
+ 
+ gradient_store = gradient;
+ retp(gradient);
+ endp;
+
+ 
+ 
+// Procedure to compute the pdf of a multivariate normal
+// x is vector and s is the covariance matrix
+proc pdfmvn(x,u,s);
+ local d,p,p1,p2;
+ d = rows(x);
+ p1 = exp(-0.5*((x-u)'*inv(s)*(x-u)));
+ p2 = ((2*pi)^(d/2))*sqrt(det(s));
+ p = p1/p2;
+ retp(p);
+endp;
+
+proc(1)=pdfgmean(x,mu,s);
+    local d,p,p1,p2,p3,grad1,grad,store,ie;
+	 d = rows(x);
+	 p1 = exp(-0.5*((x-mu)'*inv(s)*(x-mu)));
+	 p2 = ((2*pi)^(d/2))*sqrt(det(s));
+	 p3 = inv(s);
+	 p = p1/p2;
+	 store = zeros(d,1);
+	 for ie(1,d,1);
+		  grad = -1*((x-mu).*p3[.,ie]); /*It should be positive, there should not be any negative sign*/
+		  grad1 = sumc(grad);
+		  grad1 = p*grad1;
+		  store[ie] = grad1;
+	 endfor;
+	 retp(store);
+endp;
+
+/*Gradient with respect to each element of the variance covariance matrix*/
+proc(1)=pdfgcov(x,mu,r);
+	local d,p1,p2,p,p4,out,i,j,diff_matrix,part11,part12,part13,part1,s,ncholerr,diff_matrix1;
+    local part21,part22,part23,part24,part2,gradient;
+    d = rows(x);
+    s = xpnd(r);
+	ncholerr = rows(r);
+    p1 = exp(-0.5*((x-mu)'*inv(s)*(x-mu)));
+    p2 = ((2*pi)^(d/2));
+    p = p1/p2;
+    p4 = inv(s);
+    out = {};
+    for i(1,ncholerr,1);
+        
+            diff_matrix1 = zeros(ncholerr,1);
+			diff_matrix1[i,1]= 1;
+			diff_matrix = xpnd(diff_matrix1);
+            
+            part11 = p4*diff_matrix;
+            part12 = diag(part11);
+            part13 = sumc(part12);
+            part1 = -0.5*part13;
+            part1 = part1/sqrt(det(s));
+            
+            part21 = (((p4*(x-mu))*(x-mu)')*p4);
+            part22 = part21*diff_matrix;
+            part23 = diag(part22);
+            part24 = sumc(part23);
+			/**The following code block should work as well**/
+			/*part21 = p4*diff_matrix*p4;
+			part22 = (x-mu)'*part21;
+			part23 = part22 * (x-mu);
+			part24 = part23;*/
+            part2 = 0.5*part24;
+            part2 = part2/sqrt(det(s));
+            
+            gradient = p*(part1 + part2);
+            out = out | gradient;
+        
+    endfor;
+    retp(out);
+endp;
+
+proc(1)=cdfbvn_grad(a,b,corr);
+    local d_a,d_b,d_corr;
+    d_a     = pdfn(a) .* cdfn((b- corr .* a) ./ sqrt(1-corr .* corr) ); //formulae found
+    d_b     = pdfn(b) .* cdfn((a- corr .* b) ./ sqrt(1-corr .* corr) ); //formuale found
+    d_corr  = (exp(-0.5*((a^2 + b^2 - 2*corr .* a .* b   ) ./ (1-corr .* corr) ))) ./ ((2*pi) * sqrt(1-corr .* corr)); //The bivariate normal pdf - why is that?
+    retp(d_a|d_b|d_corr);
+endp;

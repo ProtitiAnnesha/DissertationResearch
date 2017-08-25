@@ -1,0 +1,1787 @@
+/* In this program, mainFun is called first to compute the participation and consumption average across 100 error draws
+	At this stage observed budget is used...
+	
+	The forecasted budget is sorted as 1 to nobs individual for 1st error, then 1 to nobs individual for 2nd error and so on and is returned from mainFun
+	
+	In the 2nd stage, for each error draw of the top nest 100 forecasts are obtaned for the bottom nest, this is done using mainFun2 function call
+	
+	*********************************/
+
+/**** The purpose of the V4 of the code is to change some variables and see their impact on tour level and stop level participation *******/
+
+
+new;
+library maxlik;
+maxset;
+
+/*****************************************************************************
+                  Global Variable Definitions
+*****************************************************************************/
+clearg __row,nobs,_config,_alp0to1,_price, _randper, _randd, datatset,_po,post_obs, nrep, Gradient_Store, Gradient_Store1, nc_top, nc_bot, _cholk, seedNew;
+cls;
+
+
+//__row    = 2093;    // Number of rows to be read at a time by the log-likelihood function
+//nobs     = 2093;    // Number of observations in the dataset
+_config  = 4;       // This model is only written for configuration 4; i.e. for gamma specification
+_alp0to1 = 1;       // 1 if you want the Alpha values to be constrained between 0 and 1, 0 otherwise
+_price   = 0;       // 1 if there is price variation across goods, 0 otherwise
+
+nc_top   = 8;       // Number of alternatives in the top nest
+numout_top = 1;     // Number of outside goods in the top level; the no_tour option
+numout_bot = 2;  // Number of outside goods in the bottom level; the main activity and the return home tour
+nc_bot = { 0,9,8,7,6,5,5,5 }; // nc_bot will be a nc_top by 1 column vector, each of the element will hold the number of alternatives in each of the bottom nests 
+_cholk = 1;        // If cholesky factors are to be estimated
+
+/* Evaluation of the multivariate normal cumulative distribution function (cdf)
+   To improve running times, it is recommended to use MACML for the estimation. Otherwise, the user can use the GAUSS function 
+   cdfn to compute the cdf */
+_macml   = 1;    	// 1 if using MACML to estimate the multivariate normal cdf, 0 if using the biult-in GAUSS function
+_randper = 1;       // MACML variable: random permutations of all digits 
+_randd   = 0;       // MACML variable: all permutations or random permutations
+
+
+nrep = 100;   // Number of times forecasts will be generated
+
+//1. Dataset 1: for urban dummy prediction
+//2. Dataset 2: for age prediction
+//3. Dataset 3: for income prediction
+//dataset  = "C:\\Annesha\\NHTSData_2008_2009\\GAUSS_Emperical\\Merged_AZ_LA_5263_Pred1.dat"; // provide path for the gauss data matrix
+//dataset  = "C:\\Annesha\\NHTSData_2008_2009\\GAUSS_Emperical\\Merged_AZ_LA_5233_Pred2.dat"; // provide path for the gauss data matrix
+//dataset  = "C:\\Annesha\\NHTSData_2008_2009\\GAUSS_Emperical\\Merged_AZ_LA_5233_Pred3.dat"; // provide path for the gauss data matrix
+//dataset  = "C:\\AnneshaEnam\\GaussWorkingFiles\\NHTS\\Revision\\Merged_AZ_LA_5263.dat"; // provide path for the gauss data matrix // For remote desktop
+dataset  = "C:\\AnneshaEnam\\GaussWorkingFiles\\NHTS\\Revision\\Merged_AZ_LA_5233_Pred3.dat"; // provide path for the gauss data matrix // For remote desktop
+dataMat = loadd(dataset);  //print "rows and columns: " rows(dataMat) cols(dataMat);
+
+
+@Halton draw file@
+/*outhalt = "C:\\Annesha\\NHTSData_2008_2009\\GAUSS_Emperical\\haltbrat_mdcp_2093obs_100rep.dat";
+haltMat = loadd(outhalt);  //print "rows and columns: " rows(haltMat)  cols(haltMat);
+*/
+
+/*****************************************************************************
+                    Variable Specification Area
+*****************************************************************************/
+/* Position of UNO variable (i.e., the column of ones) in data set. 
+   The dataset should consist of a column of ones.
+   Modify if the label (in double-quotes) of the column of ones in your dataset is different from "uno"  */
+{ unov,ivuno } = indices(dataset,"uno");
+
+/* Position of zero variable (i.e., the column of zeros) in data set. 
+   The dataset should consist of a column of zeros.
+   Modify if the label (in double-quotes) of the column of zeros in your dataset is different from "zero"  */
+{ zerov,ivzero } = indices(dataset,"zero");
+
+/* Position of WEIGHT variable (i.e., the column of weights).
+   If the data has weights, then the dataset should consist of a column of weights. 
+   Modify the label (in double-quotes) with the label of the weight variable, if your data has weights  */
+{ weight,wtind } = indices(dataset,"uno");
+
+/* Positions of the DEPENDENT Variables (i.e., the consumption quantities for each alternative - NOT consumption expenditures for each alternative).  
+   Provide labels (one label in each double-quote) of the dependent variables (i.e., consumption quantities) in your dataset. 
+   Number of labels = number of alternatives. */
+  
+  @DEFINE ALL THE ALTERNATIVES BOTH IN THE TOP NEST AS WELL AS IN THE BOTTOM NEST@
+  @THE SERIAL SHOULD BE TOP NEST THEN 1ST BOTTOM NEST, THEN 2ND BOTTOM NEST THEN SO ON@
+
+{ choicm,f } = indices(dataset,"atHome"|"WORK_N"| "SCHOOL_N"| "ESCORT_N"| "PERBUS_N"| "SHOP_N"| "MEAL_N"| "SOCREC_N"|  // Top nest
+                                "W_MAIN"|"W_RTHM"|"W_WORK"|"W_SCHOL"|"W_ESCRT"|"W_PERBS"|"W_SHOP"|"W_MEAL"|"W_SOCRC"|  // Work nest
+								"SC_MAIN"|"SC_RTHM"|"SC_SCHOL"|"SC_ESCRT"|"SC_PERBS"|"SC_SHOP"|"SC_MEAL"|"SC_SOCRC"|   // School nest
+								"E_MAIN"|"E_RTHM"|"E_ESCRT"|"E_PERBS"|"E_SHOP"|"E_MEAL"|"E_SOCRC"|                     // Escort nest
+								"P_MAIN"|"P_RTHM"|"P_PERBS"|"P_SHOP"|"P_MEAL"|"P_SOCRC"|							   // Personal business nest	
+								"SH_MAIN"|"SH_RTHM"|"SH_SHOP"|"SH_MEAL"|"SH_SOCRC"|									   // Shopping nest	
+								"M_MAIN"|"M_RTHM"|"M_SHOP"|"M_MEAL"|"M_SOCRC"|										   // Meal nest	
+								"SR_MAIN"|"SR_RTHM"|"SR_SHOP"|"SR_MEAL"|"SR_SOCRC" ); 								   // Social recreation nest	
+
+
+dataMat = selif(dataMat, (sumc(dataMat[.,f[1:nc_top]]') .== 1440)); // print "rows and columns: " rows(dataMat);
+nobs = rows(dataMat);  print "nobs: " nobs  "rows(dataMat): " rows(dataMat);
+
+/* Positions of PRICE variables
+   Provide labels of price variables (one label in each double-quote). Number of labels = number of alternatives.
+   Provide all UNO variables if there is no price variation */
+//{ cprice,fp } = indices(dataset,"uno"|"uno");//|"uno");//|"uno"|"uno");//|"uno"|"uno"|"uno"|"uno"|"uno");
+
+/* Definition of INDEPENDENT variables */
+
+/* In the following specification, ivm1, ivm2, ivm3 contain independent variable specifications (on right hand side) for baseline utility (PSI) for alternatives 1, 2 and 3
+   Add a row for ivm4 below if there is a 4th alternative, another addiitonal row for ivm5 if there is a 5th alternative, ...  (number of rows = number of alternatives);
+   Number of columns = Number of variables including alternative specific constants; consider first alternative as base  */
+
+@THIS IS THE BASLINE UTILITY SPECIFICATION FOR THE TOP NEST@ 
+/*let	ivm1	=	{	zero 	zero 	zero   zero 	zero	zero	zero	zero 	zero   zero 	zero	zero	zero	zero 	zero 	zero	zero	zero 	zero 		zero	zero 		zero	zero	zero 	zero 	zero 		zero	zero	zero	zero 		zero	zero	zero 	zero 		zero	zero	zero 	zero 		zero	zero	zero     zero	};
+let	ivm2	=	{	uno 	zero	zero   zero 	zero 	zero	zero	zero 	zero   age1 	zero	zero	zero	ageNew2 zero 	zero	zero	zero 	incg2 		zero	zero 		zero	zero	zero 	zero 	zero 		zero	zero	zero	zero 		zero	zero	zero 	zero 		zero	wPrtDum	zero 	zero 		zero	zero	zero     zero	};
+let	ivm3	=	{	zero 	uno 	zero   zero 	zero 	zero	zero	male 	zero   zero 	age1	zero	zero	zero 	ageNew2 zero	zero	zero 	zero 		zero	zero 		incg3	zero	zero 	zero 	zero 		zero	zero	zero	zero 		zero	frday	zero 	zero 		zero	zero	wPrtDum zero 		zero	zero	zero     zone	};
+let	ivm4	=	{	zero  	zero 	uno    zero 	zero 	zero 	zero	zero 	male   zero 	zero	zero	zero	zero 	zero 	ageNew2	zero	zero 	zero 		zero	zero 		zero	zero	zero 	zero 	zero 		zero	zero	zero	zero 		zero	zero	zero 	zero 		zero	zero	zero 	wPrtDum 	zero	zero	zero     zero	};
+let	ivm5	=	{	zero 	zero 	zero   uno 		zero 	zero 	zero 	zero 	zero   zero 	zero	age1	zero	zero 	zero 	zero	ageNew2	ageNew3 zero 		zero	zero 		zero	zero	zero 	zero 	zero 		zero	zero	urbDum	zero 		zero	zero	zero 	zero 		zero	zero	zero 	zero 		wPrtDum	zero	zero     zero	};
+let	ivm6	=	{	zero 	zero 	zero   zero 	uno 	zero 	zero 	zero 	zero   zero 	zero	zero	zero	zero 	zero 	zero	zero	zero 	zero 		zero	zero 		zero	incg3	zero 	zero 	incg4 		zero	zero	zero	urbDum 		zero	zero	frday 	zero 		zero	zero	zero 	zero 		zero	wPrtDum	zero     zero	};
+let	ivm7	=	{	zero 	zero 	zero   zero 	zero 	uno 	zero 	zero 	zero   zero 	zero	zero	zero	zero 	zero 	zero	zero	zero 	zero 		incg2	zero 		zero	zero	incg3 	zero 	zero 		incg4	zero	zero	zero 		zero	zero	zero 	frday 		zero	zero	zero 	zero 		zero	zero	zero     zero	};
+let	ivm8	=	{	zero 	zero 	zero   zero 	zero 	zero 	uno 	zero 	zero   zero 	zero	zero	age1	zero 	zero 	zero	zero	zero 	zero 		zero	incg2 		zero	zero	zero    incg3 	zero 		zero	incg4	zero	zero 		urbDum	zero	zero 	zero 		frday	zero	zero 	zero 		zero	zero	wPrtDum  zero	};
+*/
+
+@Converted urban dummies into urbDum01@
+let	ivm1	=	{	zero 	zero 	zero   zero 	zero	zero	zero	zero 	zero   zero 	zero	zero	zero	zero 	zero 	zero	zero	zero 	zero 		zero	zero 		zero	zero	zero 	zero 	zero 		zero	zero	zero		zero 		zero		zero	zero 	zero 		zero	zero	zero 	zero 		zero	zero	zero     zero	};
+let	ivm2	=	{	uno 	zero	zero   zero 	zero 	zero	zero	zero 	zero   age1 	zero	zero	zero	ageNew2 zero 	zero	zero	zero 	incg2 		zero	zero 		zero	zero	zero 	zero 	zero 		zero	zero	zero		zero 		zero		zero	zero 	zero 		zero	wPrtDum	zero 	zero 		zero	zero	zero     zero	};
+let	ivm3	=	{	zero 	uno 	zero   zero 	zero 	zero	zero	male 	zero   zero 	age1	zero	zero	zero 	ageNew2 zero	zero	zero 	zero 		zero	zero 		incg3	zero	zero 	zero 	zero 		zero	zero	zero		zero 		zero		frday	zero 	zero 		zero	zero	wPrtDum zero 		zero	zero	zero     zone	};
+let	ivm4	=	{	zero  	zero 	uno    zero 	zero 	zero 	zero	zero 	male   zero 	zero	zero	zero	zero 	zero 	ageNew2	zero	zero 	zero 		zero	zero 		zero	zero	zero 	zero 	zero 		zero	zero	zero		zero 		zero		zero	zero 	zero 		zero	zero	zero 	wPrtDum 	zero	zero	zero     zero	};
+let	ivm5	=	{	zero 	zero 	zero   uno 		zero 	zero 	zero 	zero 	zero   zero 	zero	age1	zero	zero 	zero 	zero	ageNew2	ageNew3 zero 		zero	zero 		zero	zero	zero 	zero 	zero 		zero	zero	urbDum01	zero 		zero		zero	zero 	zero 		zero	zero	zero 	zero 		wPrtDum	zero	zero     zero	};
+let	ivm6	=	{	zero 	zero 	zero   zero 	uno 	zero 	zero 	zero 	zero   zero 	zero	zero	zero	zero 	zero 	zero	zero	zero 	zero 		zero	zero 		zero	incg3	zero 	zero 	incg4 		zero	zero	zero		urbDum01 	zero		zero	frday 	zero 		zero	zero	zero 	zero 		zero	wPrtDum	zero     zero	};
+let	ivm7	=	{	zero 	zero 	zero   zero 	zero 	uno 	zero 	zero 	zero   zero 	zero	zero	zero	zero 	zero 	zero	zero	zero 	zero 		incg2	zero 		zero	zero	incg3 	zero 	zero 		incg4	zero	zero		zero 		zero		zero	zero 	frday 		zero	zero	zero 	zero 		zero	zero	zero     zero	};
+let	ivm8	=	{	zero 	zero 	zero   zero 	zero 	zero 	uno 	zero 	zero   zero 	zero	zero	age1	zero 	zero 	zero	zero	zero 	zero 		zero	incg2 		zero	zero	zero    incg3 	zero 		zero	incg4	zero		zero 		urbDum01	zero	zero 	zero 		frday	zero	zero 	zero 		zero	zero	wPrtDum  zero	};
+
+
+//Add a row for v4 below if there is a 4th alternative, another additional row for v5 if there is a 5th alternative,.... (number of rows = number of alternatives)
+{ v1,ivmt1 }   = indices(dataset,ivm1');
+{ v2,ivmt2 }   = indices(dataset,ivm2');
+{ v3,ivmt3 }   = indices(dataset,ivm3');
+{ v4,ivmt4 }   = indices(dataset,ivm4');
+{ v5,ivmt5 }   = indices(dataset,ivm5');
+{ v6,ivmt6 }   = indices(dataset,ivm6');
+{ v7,ivmt7 }   = indices(dataset,ivm7');
+{ v8,ivmt8 }   = indices(dataset,ivm8');
+
+// DEFINE BASELINE UTILITY SPECIFICATIONS FOR THE BOTTOM NESTS
+
+@THIS IS FOR WORK TOUR@
+/*let	ivm11	=	{	zero 	zero 	zero   zero 	zero	zero	zero	zero  zero 	zero   zero 	zero	zero 	zero  zero 	zero 	zero   zero 	zero	zero 	zero 	zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	zero   	zero 	zero   	zero	zero   	zero 	zero   	zero 	zero  	zero   	zero	zero	zero   	zero   	zero 	zero  	zero	zero   	zero   	zero };
+let	ivm12	=	{	uno 	zero	zero   zero 	zero 	zero	zero	zero  zero 	zero   zero 	zero	zero    zero  zero 	zero 	zero   zero 	zero	zero 	zero 	zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	zero   	zero 	zero   	zero	zero   	zero 	zero   	zero 	zero  	zero   	zero	zero	zero   	zero   	zero 	zero    zero	zero   	zero   	zero };
+let	ivm13	=	{	zero 	uno 	zero   zero 	zero 	zero	zero	zero  zero 	zero   zero 	zero	zero    age1  zero 	zero 	zero   zero 	zero	ageNew2 zero 	zero   	zero 	zero	zero 	zero	incg3 zero	zero 	zero   	zero 	zero	zero 	zero   	flxTmDm zero   	zero	zero   	zero 	zero   	zero 	zero  	zero    zero	zero   	drvDum	zero   	zero 	zero    zone	zero   	zero   	zero } ;
+let	ivm14	=	{	zero  	zero 	uno    zero 	zero 	zero 	zero	zero  zero 	zero   zero 	zero	zero    zero  age1 	zero 	zero   zero 	zero	zero 	zero 	zero   	zero 	zero	zero 	incg2	zero  incg3	zero 	zero   	zero 	incg4	zero 	zero   	zero 	zero   	zero	zero   	zero 	zero   	zero 	zero    frday   zero	zero	zero   	zero   	zero 	zero    zero	zero   	zero   	zero };
+let	ivm15	=	{	zero 	zero 	zero   uno 		zero 	zero 	zero 	zero  male 	zero   zero 	zero	zero    zero  zero 	age1 	zero   zero 	zero	zero 	ageNew2 zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	zero   	zero 	flxTmDm zero	zero   	zero 	zero   	zero 	zero  	zero   	zero	zero	zero   	zero   	zero 	zero    zero	zone   	zero   	zero };
+let	ivm16	=	{	zero 	zero 	zero   zero 	uno 	zero 	zero 	zero  zero 	male   zero 	zero	zero    zero  zero 	zero 	age1   zero 	zero	zero 	zero 	ageNew2 zero 	zero	ageNew3 zero	zero  zero	incg3 	zero   	zero 	zero	zero 	zero   	zero 	zero    flxTmDm	zero   	zero 	zero   	zero 	zero  	zero   	frday	zero	zero   	zero   	zero 	zero    zero	zero   	zero   	zero };
+let	ivm17	=	{	zero 	zero 	zero   zero 	zero 	uno 	zero 	zero  zero 	zero   male 	zero	zero    zero  zero 	zero 	zero   age1 	zero	zero 	zero 	zero   	ageNew2 zero	zero 	zero	zero  zero	zero 	incg3   zero 	zero	zero 	zero    zero 	zero    zero	flxTmDm zero 	zero   	urbDum 	zero  	zero   	zero	zero	zero    drvDum  zero 	zero    zero	zero   	zone   	zero };
+let	ivm18	=	{	zero 	zero 	zero   zero 	zero 	zero 	uno 	zero  zero 	zero   zero 	male	zero    zero  zero 	zero 	zero   zero 	age1	zero 	zero 	zero   	zero 	ageNew2	zero 	zero	zero  zero	zero 	zero   	incg3 	zero	incg4 	zero   	zero 	zero    zero	zero    flxTmDm zero   	zero 	zero  	zero   	zero	frday	zero   	zero   	drvDum 	zero    zero	zero   	zero   	zero };
+let	ivm19	=	{	zero 	zero 	zero   zero 	zero 	zero 	zero 	uno   zero 	zero   zero 	zero	male    zero  zero 	zero 	zero   zero 	zero	zero 	zero 	zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	incg4   zero 	zero    zero	zero    zero 	flxTmDm zero 	urbDum  zero   	zero	zero	zero   	zero   	zero 	drvDum  zero	zero   	zero   	zone };
+*/
+
+@Changed urban dummy@
+let	ivm11	=	{	zero 	zero 	zero   zero 	zero	zero	zero	zero  zero 	zero   zero 	zero	zero 	zero  zero 	zero 	zero   zero 	zero	zero 	zero 	zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	zero   	zero 	zero   	zero	zero   	zero 	zero   	zero 		zero  		zero   	zero	zero	zero   	zero   	zero 	zero  	zero	zero   	zero   	zero };
+let	ivm12	=	{	uno 	zero	zero   zero 	zero 	zero	zero	zero  zero 	zero   zero 	zero	zero    zero  zero 	zero 	zero   zero 	zero	zero 	zero 	zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	zero   	zero 	zero   	zero	zero   	zero 	zero   	zero 		zero  		zero   	zero	zero	zero   	zero   	zero 	zero    zero	zero   	zero   	zero };
+let	ivm13	=	{	zero 	uno 	zero   zero 	zero 	zero	zero	zero  zero 	zero   zero 	zero	zero    age1  zero 	zero 	zero   zero 	zero	ageNew2 zero 	zero   	zero 	zero	zero 	zero	incg3 zero	zero 	zero   	zero 	zero	zero 	zero   	flxTmDm zero   	zero	zero   	zero 	zero   	zero 		zero  		zero    zero	zero   	drvDum	zero   	zero 	zero    zone	zero   	zero   	zero } ;
+let	ivm14	=	{	zero  	zero 	uno    zero 	zero 	zero 	zero	zero  zero 	zero   zero 	zero	zero    zero  age1 	zero 	zero   zero 	zero	zero 	zero 	zero   	zero 	zero	zero 	incg2	zero  incg3	zero 	zero   	zero 	incg4	zero 	zero   	zero 	zero   	zero	zero   	zero 	zero   	zero 		zero    	frday   zero	zero	zero   	zero   	zero 	zero    zero	zero   	zero   	zero };
+let	ivm15	=	{	zero 	zero 	zero   uno 		zero 	zero 	zero 	zero  male 	zero   zero 	zero	zero    zero  zero 	age1 	zero   zero 	zero	zero 	ageNew2 zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	zero   	zero 	flxTmDm zero	zero   	zero 	zero   	zero 		zero  		zero   	zero	zero	zero   	zero   	zero 	zero    zero	zone   	zero   	zero };
+let	ivm16	=	{	zero 	zero 	zero   zero 	uno 	zero 	zero 	zero  zero 	male   zero 	zero	zero    zero  zero 	zero 	age1   zero 	zero	zero 	zero 	ageNew2 zero 	zero	ageNew3 zero	zero  zero	incg3 	zero   	zero 	zero	zero 	zero   	zero 	zero    flxTmDm	zero   	zero 	zero   	zero 		zero  		zero   	frday	zero	zero   	zero   	zero 	zero    zero	zero   	zero   	zero };
+let	ivm17	=	{	zero 	zero 	zero   zero 	zero 	uno 	zero 	zero  zero 	zero   male 	zero	zero    zero  zero 	zero 	zero   age1 	zero	zero 	zero 	zero   	ageNew2 zero	zero 	zero	zero  zero	zero 	incg3   zero 	zero	zero 	zero    zero 	zero    zero	flxTmDm zero 	zero   	urbDum01 	zero  		zero   	zero	zero	zero    drvDum  zero 	zero    zero	zero   	zone   	zero };
+let	ivm18	=	{	zero 	zero 	zero   zero 	zero 	zero 	uno 	zero  zero 	zero   zero 	male	zero    zero  zero 	zero 	zero   zero 	age1	zero 	zero 	zero   	zero 	ageNew2	zero 	zero	zero  zero	zero 	zero   	incg3 	zero	incg4 	zero   	zero 	zero    zero	zero    flxTmDm zero   	zero 		zero  		zero   	zero	frday	zero   	zero   	drvDum 	zero    zero	zero   	zero   	zero };
+let	ivm19	=	{	zero 	zero 	zero   zero 	zero 	zero 	zero 	uno   zero 	zero   zero 	zero	male    zero  zero 	zero 	zero   zero 	zero	zero 	zero 	zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	incg4   zero 	zero    zero	zero    zero 	flxTmDm zero 		urbDum01  	zero   	zero	zero	zero   	zero   	zero 	drvDum  zero	zero   	zero   	zone };
+
+
+@THIS IS FOR SCHOOL TOUR@
+/*let	ivm21	=	{	zero 	zero 	zero   zero 	zero	zero	zero	zero 	zero 	zero   zero 	zero	zero	zero   	zero  zero	};
+let	ivm22	=	{	uno 	zero	zero   zero 	zero 	zero	zero	zero 	zero 	zero   zero 	zero	zero	zero   	zero  zero	};
+let	ivm23	=	{	zero 	uno 	zero   zero 	zero 	zero	zero	male 	zero 	zero   zero 	incg3	zero	zero   	zero  zero	};
+let	ivm24	=	{	zero  	zero 	uno    zero 	zero 	zero 	zero	zero 	age1 	zero   zero 	zero	incg3	zero   	zero  zero	};
+let	ivm25	=	{	zero 	zero 	zero   uno 		zero 	zero 	zero 	zero 	zero 	age1   zero 	zero	zero	incg3 	zero  zero	};
+let	ivm26	=	{	zero 	zero 	zero   zero 	uno 	zero 	zero 	zero 	zero 	zero   age1 	zero	zero	zero   	zero  urbDum	};
+let	ivm27	=	{	zero 	zero 	zero   zero 	zero 	uno 	zero 	zero 	zero 	zero   zero 	zero	zero	zero   	zero  zero	};
+let	ivm28	=	{	zero 	zero 	zero   zero 	zero 	zero 	uno 	zero	zero 	zero   zero 	zero	zero	zero   	incg3 zero	};
+*/
+
+@Changed urban dummy@
+let	ivm21	=	{	zero 	zero 	zero   zero 	zero	zero	zero	zero 	zero 	zero   zero 	zero	zero	zero   	zero  zero	};
+let	ivm22	=	{	uno 	zero	zero   zero 	zero 	zero	zero	zero 	zero 	zero   zero 	zero	zero	zero   	zero  zero	};
+let	ivm23	=	{	zero 	uno 	zero   zero 	zero 	zero	zero	male 	zero 	zero   zero 	incg3	zero	zero   	zero  zero	};
+let	ivm24	=	{	zero  	zero 	uno    zero 	zero 	zero 	zero	zero 	age1 	zero   zero 	zero	incg3	zero   	zero  zero	};
+let	ivm25	=	{	zero 	zero 	zero   uno 		zero 	zero 	zero 	zero 	zero 	age1   zero 	zero	zero	incg3 	zero  zero	};
+let	ivm26	=	{	zero 	zero 	zero   zero 	uno 	zero 	zero 	zero 	zero 	zero   age1 	zero	zero	zero   	zero  urbDum01	};
+let	ivm27	=	{	zero 	zero 	zero   zero 	zero 	uno 	zero 	zero 	zero 	zero   zero 	zero	zero	zero   	zero  zero	};
+let	ivm28	=	{	zero 	zero 	zero   zero 	zero 	zero 	uno 	zero	zero 	zero   zero 	zero	zero	zero   	incg3 zero	};
+
+
+
+@THIS IS FOR ESCORT TOUR@
+/*let	ivm31	=	{	zero 	zero 	zero   zero 	zero	zero	zero 	zero   zero 	zero	zero 	zero 	zero   zero 	zero	zero 	zero 	zero	zero 	zero 	zero   	zero 	zero	zero   zero   zero   	zero 	zero	zero   		zero  	 };//zero		zero   		zero };
+let	ivm32	=	{	uno 	zero	zero   zero 	zero 	zero	zero 	zero   zero 	zero	zero    zero 	zero   zero 	zero	zero 	zero 	zero	zero 	zero 	zero   	zero 	zero	zero   zero   zero   	zero 	zero	zero   		zero  	 };//zero		zero   		zero };
+let	ivm33	=	{	zero 	uno 	zero   zero 	zero 	zero	male 	zero   zero 	zero	zero    zero 	zero   zero 	zero	zero 	zero 	zero	zero 	zero 	incg3   zero 	zero	incg4  zero   zero   	zero 	zero	zone   		zero  	 };//drvDum		zero   		zero };
+let	ivm34	=	{	zero  	zero 	uno    zero 	zero 	zero 	zero 	male   zero 	zero	age1    zero 	zero   ageNew2 	zero	ageNew3 zero 	zero	zero 	zero 	zero   	zero 	zero	zero   zero   zero   	urbDum 	zero	zero   		zero 	 };//zero		zero   		zero };
+let	ivm35	=	{	zero 	zero 	zero   uno 		zero 	zero 	zero 	zero   male 	zero	zero    age1 	zero   zero 	zero	zero 	zero 	incg2	zero 	zero 	zero   	incg3 	zero	zero   incg4  zero   	zero 	zero	zero   		zero     };//zero		zero   		zero };
+let	ivm36	=	{	zero 	zero 	zero   zero 	uno 	zero 	zero 	zero   zero 	male	zero    zero 	age1   zero 	ageNew2	zero 	ageNew3 zero	incg2 	zero 	zero   	zero 	zero	zero   zero   zero   	zero 	zero	zero   		zone     };//zero		drvDum   	zero };
+let	ivm37	=	{	zero 	zero 	zero   zero 	zero 	uno 	zero 	zero   zero 	zero	zero    zero 	zero   zero 	zero	zero 	zero 	zero	zero 	incg2 	zero   	zero 	incg3	zero   zero   incg4   	zero 	urbDum	zero   		zero     };//zero		zero   		drvDum };
+*/
+
+@Changed urban dummy@
+let	ivm31	=	{	zero 	zero 	zero   zero 	zero	zero	zero 	zero   zero 	zero	zero 	zero 	zero   zero 	zero	zero 	zero 	zero	zero 	zero 	zero   	zero 	zero	zero   zero   zero   	zero 		zero	 zero   		zero  	 };//zero		zero   		zero };
+let	ivm32	=	{	uno 	zero	zero   zero 	zero 	zero	zero 	zero   zero 	zero	zero    zero 	zero   zero 	zero	zero 	zero 	zero	zero 	zero 	zero   	zero 	zero	zero   zero   zero   	zero 		zero	 zero   		zero  	 };//zero		zero   		zero };
+let	ivm33	=	{	zero 	uno 	zero   zero 	zero 	zero	male 	zero   zero 	zero	zero    zero 	zero   zero 	zero	zero 	zero 	zero	zero 	zero 	incg3   zero 	zero	incg4  zero   zero   	zero 		zero	 zone   		zero  	 };//drvDum		zero   		zero };
+let	ivm34	=	{	zero  	zero 	uno    zero 	zero 	zero 	zero 	male   zero 	zero	age1    zero 	zero   ageNew2 	zero	ageNew3 zero 	zero	zero 	zero 	zero   	zero 	zero	zero   zero   zero   	urbDum01 	zero	 zero   		zero 	 };//zero		zero   		zero };
+let	ivm35	=	{	zero 	zero 	zero   uno 		zero 	zero 	zero 	zero   male 	zero	zero    age1 	zero   zero 	zero	zero 	zero 	incg2	zero 	zero 	zero   	incg3 	zero	zero   incg4  zero   	zero 		zero	 zero   		zero     };//zero		zero   		zero };
+let	ivm36	=	{	zero 	zero 	zero   zero 	uno 	zero 	zero 	zero   zero 	male	zero    zero 	age1   zero 	ageNew2	zero 	ageNew3 zero	incg2 	zero 	zero   	zero 	zero	zero   zero   zero   	zero 		zero	 zero   		zone     };//zero		drvDum   	zero };
+let	ivm37	=	{	zero 	zero 	zero   zero 	zero 	uno 	zero 	zero   zero 	zero	zero    zero 	zero   zero 	zero	zero 	zero 	zero	zero 	incg2 	zero   	zero 	incg3	zero   zero   incg4   	zero 		urbDum01 zero   		zero     };//zero		zero   		drvDum };
+
+
+@THIS IS FOR PERSONAL BUSINESS TOUR@
+/*let	ivm41	=	{	zero 	zero 	zero   zero 	zero	zero   zero 	zero   zero 	zero   zero 	zero  	zero 		zero     zero 	   zero     zero 	   zero    zero   zero 	   zero    };
+let	ivm42	=	{	uno 	zero	zero   zero 	zero 	zero   zero 	zero   zero 	zero   zero 	zero  	zero 		zero     zero 	   zero 	zero 	   zero    zero   zero     zero    };
+let	ivm43	=	{	zero 	uno 	zero   zero 	zero 	zero   zero 	zero   age1 	zero   ageNew2 	zero  	zero 	    ageNew3  zero 	   zero     zero 	   zero    frday  zero     zone    };
+let	ivm44	=	{	zero  	zero 	uno    zero 	zero 	male   zero 	zero   zero 	zero   zero 	ageNew2 zero 		zero  	 zero 	   zero 	urbDum     zero    zero   zero     zero    };
+let	ivm45	=	{	zero 	zero 	zero   uno 		zero 	zero   male 	zero   zero 	age1   zero 	zero  	zero 		zero     zero 	   zero 	zero       urbDum  zero   frday    zero    };
+let	ivm46	=	{	zero 	zero 	zero   zero 	uno 	zero   zero 	male   zero 	zero   zero 	zero  	ageNew2 	zero     ageNew3   incg4 	zero       zero    zero   zero     zero    };
+*/
+
+@Changed urban dummy@
+let	ivm41	=	{	zero 	zero 	zero   zero 	zero	zero   zero 	zero   zero 	zero   zero 	zero  	zero 		zero     zero 	   zero     zero 	   zero     zero   zero 	   zero    };
+let	ivm42	=	{	uno 	zero	zero   zero 	zero 	zero   zero 	zero   zero 	zero   zero 	zero  	zero 		zero     zero 	   zero 	zero 	   zero     zero   zero     zero    };
+let	ivm43	=	{	zero 	uno 	zero   zero 	zero 	zero   zero 	zero   age1 	zero   ageNew2 	zero  	zero 	    ageNew3  zero 	   zero     zero 	   zero     frday  zero     zone    };
+let	ivm44	=	{	zero  	zero 	uno    zero 	zero 	male   zero 	zero   zero 	zero   zero 	ageNew2 zero 		zero  	 zero 	   zero 	urbDum01   zero     zero   zero     zero    };
+let	ivm45	=	{	zero 	zero 	zero   uno 		zero 	zero   male 	zero   zero 	age1   zero 	zero  	zero 		zero     zero 	   zero 	zero       urbDum01 zero   frday    zero    };
+let	ivm46	=	{	zero 	zero 	zero   zero 	uno 	zero   zero 	male   zero 	zero   zero 	zero  	ageNew2 	zero     ageNew3   incg4 	zero       zero     zero   zero     zero    };
+
+
+@THIS IS FOR SHOP TOUR@
+let	ivm51	=	{	zero 	zero 	zero   zero 	zero 	zero 	zero 	zero 	zero 	zero 	zero  zero 	zero 	zero 	zero 	zero 	zero 	};
+let	ivm52	=	{	uno 	zero	zero   zero 	zero 	zero 	zero  	zero 	zero 	zero 	zero  zero 	zero 	zero 	zero 	zero 	zero 	};
+let	ivm53	=	{	zero 	uno 	zero   zero 	zero 	ageNew2 zero    ageNew3 zero 	incg2 	zero  incg3 zero 	incg4 	zero 	zero 	drvdum 	};
+let	ivm54	=	{	zero  	zero 	uno    zero 	zero  	zero 	zero  	zero 	zero 	zero 	zero  zero 	incg3 	zero 	incg4 	frday 	zero 	};
+let	ivm55	=	{	zero 	zero 	zero   uno 		age1 	zero 	ageNew2 zero 	ageNew3 zero 	incg2 zero 	zero 	zero 	zero 	zero 	zero 	};
+
+@THIS IS FOR MEAL TOUR@
+/*let	ivm61	=	{	zero 	zero 	zero   zero 	zero 	zero 	zero 	zero 	zero 	zero 	zero 	};
+let	ivm62	=	{	uno 	zero	zero   zero 	zero 	zero 	zero    zero 	zero 	zero 	zero 	};
+let	ivm63	=	{	zero 	uno 	zero   zero 	ageNew3 zero 	incg3   incg4   urbDum 	zero 	zone 	};
+let	ivm64	=	{	zero  	zero 	uno    zero 	zero 	incg2 	zero   	zero    zero 	zero 	zero 	};
+let	ivm65	=	{	zero 	zero 	zero   uno 		zero 	zero	zero    zero   	zero 	urbDum 	zero 	};
+*/
+
+@Changed urban dummy@
+let	ivm61	=	{	zero 	zero 	zero   zero 	zero 	zero 	zero 	zero 	zero 		zero 		zero 	};
+let	ivm62	=	{	uno 	zero	zero   zero 	zero 	zero 	zero    zero 	zero 		zero 		zero 	};
+let	ivm63	=	{	zero 	uno 	zero   zero 	ageNew3 zero 	incg3   incg4   urbDum01 	zero 		zone 	};
+let	ivm64	=	{	zero  	zero 	uno    zero 	zero 	incg2 	zero   	zero    zero 		zero 		zero 	};
+let	ivm65	=	{	zero 	zero 	zero   uno 		zero 	zero	zero    zero   	zero 		urbDum01 	zero 	};
+
+
+@THIS IS FOR SOCIAL RECREATION TOUR@
+/*let	ivm71	=	{	zero 	zero 	zero   zero 	zero    zero	zero 	zero  	};
+let	ivm72	=	{	uno 	zero	zero   zero 	zero   	zero 	zero 	zero  	};
+let	ivm73	=	{	zero 	uno 	zero   zero 	male    incg2   drvDum 	zero  	};
+let	ivm74	=	{	zero  	zero 	uno    zero 	zero   	zero 	zero 	urbDum  };
+let	ivm75	=	{	zero 	zero 	zero   uno 		zero   	zero 	zero 	zero 	};
+*/
+
+let	ivm71	=	{	zero 	zero 	zero   zero 	zero    zero	zero 	zero  	};
+let	ivm72	=	{	uno 	zero	zero   zero 	zero   	zero 	zero 	zero  	};
+let	ivm73	=	{	zero 	uno 	zero   zero 	male    incg2   drvDum 	zero  	};
+let	ivm74	=	{	zero  	zero 	uno    zero 	zero   	zero 	zero 	urbDum01  };
+let	ivm75	=	{	zero 	zero 	zero   uno 		zero   	zero 	zero 	zero 	};
+
+
+{ v11,ivmt11 } = indices(dataset,ivm11');
+{ v12,ivmt12 } = indices(dataset,ivm12');
+{ v13,ivmt13 } = indices(dataset,ivm13');
+{ v14,ivmt14 }   = indices(dataset,ivm14');
+{ v15,ivmt15 }   = indices(dataset,ivm15');
+{ v16,ivmt16 }   = indices(dataset,ivm16');
+{ v17,ivmt17 }   = indices(dataset,ivm17');
+{ v18,ivmt18 }   = indices(dataset,ivm18');
+{ v19,ivmt19 }   = indices(dataset,ivm19');
+
+{ v21,ivmt21 } = indices(dataset,ivm21');
+{ v22,ivmt22 } = indices(dataset,ivm22');
+{ v23,ivmt23 } = indices(dataset,ivm23');
+{ v24,ivmt24 }   = indices(dataset,ivm24');
+{ v25,ivmt25 }   = indices(dataset,ivm25');
+{ v26,ivmt26 }   = indices(dataset,ivm26');
+{ v27,ivmt27 }   = indices(dataset,ivm27');
+{ v28,ivmt28 }   = indices(dataset,ivm28');
+
+{ v31,ivmt31 } = indices(dataset,ivm31');
+{ v32,ivmt32 } = indices(dataset,ivm32');
+{ v33,ivmt33 } = indices(dataset,ivm33');
+{ v34,ivmt34 }   = indices(dataset,ivm34');
+{ v35,ivmt35 }   = indices(dataset,ivm35');
+{ v36,ivmt36 }   = indices(dataset,ivm36');
+{ v37,ivmt37 }   = indices(dataset,ivm37');
+
+{ v41,ivmt41 } = indices(dataset,ivm41');
+{ v42,ivmt42 } = indices(dataset,ivm42');
+{ v43,ivmt43 } = indices(dataset,ivm43');
+{ v44,ivmt44 }   = indices(dataset,ivm44');
+{ v45,ivmt45 }   = indices(dataset,ivm45');
+{ v46,ivmt46 }   = indices(dataset,ivm46');
+
+
+{ v51,ivmt51 } = indices(dataset,ivm51');
+{ v52,ivmt52 } = indices(dataset,ivm52');
+{ v53,ivmt53 } = indices(dataset,ivm53');
+{ v54,ivmt54 }   = indices(dataset,ivm54');
+{ v55,ivmt55 }   = indices(dataset,ivm55');
+
+
+{ v61,ivmt61 } = indices(dataset,ivm61');
+{ v62,ivmt62 } = indices(dataset,ivm62');
+{ v63,ivmt63 } = indices(dataset,ivm63');
+{ v64,ivmt64 }   = indices(dataset,ivm64');
+{ v65,ivmt65 }   = indices(dataset,ivm65');
+
+
+{ v71,ivmt71 } = indices(dataset,ivm71');
+{ v72,ivmt72 } = indices(dataset,ivm72');
+{ v73,ivmt73 } = indices(dataset,ivm73');
+{ v74,ivmt74 }   = indices(dataset,ivm74');
+{ v75,ivmt75 }   = indices(dataset,ivm75');
+
+
+/*******END OF DEFINITION OF BASSELINE UTILITY FOR TOP AND BOTTOM NEST*************************/
+										
+
+// DEFINE BASELINE UTILITY FOR THE BOTTOM NESTS THAT WILL GO TO THE TOP NEST, THAT IS THE SAME BOTTOM NEST UTILITY WITHOUT THE CONSTANT
+
+@THIS IS FOR WORK TOUR@
+/*let	ivmm11	=	{	zero 	zero   zero 	zero	zero 	zero  zero 	zero 	zero   zero 	zero	zero    zero 	zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	zero   	zero 	zero   	zero	zero   	zero 	zero   	zero 	zero  	zero   	zero	zero	zero   	zero   	zero 	zero  	zero	zero	zero   	zero };
+let	ivmm12	=	{	zero 	zero   zero 	zero	zero    zero  zero 	zero 	zero   zero 	zero	zero    zero 	zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	zero   	zero 	zero   	zero	zero   	zero 	zero   	zero 	zero  	zero   	zero	zero	zero   	zero   	zero 	zero    zero	zero	zero   	zero };
+let	ivmm13	=	{	zero 	zero   zero 	zero	zero    age1  zero 	zero 	zero   zero 	zero	ageNew2 zero 	zero   	zero 	zero	zero 	zero	incg3 zero	zero 	zero   	zero 	zero	zero 	zero   	flxTmDm zero   	zero	zero   	zero 	zero   	zero 	zero  	zero    zero	zero   	drvDum	zero   	zero 	zero    zone	zero	zero   	zero } ;
+let	ivmm14	=	{	zero 	zero   zero 	zero	zero    zero  age1 	zero 	zero   zero 	zero	zero    zero 	zero   	zero 	zero	zero 	incg2	zero  incg3	zero 	zero   	zero 	incg4	zero 	zero   	zero 	zero   	zero	zero   	zero 	zero   	zero 	zero    frday   zero	zero	zero   	zero   	zero 	zero    zero	zero	zero   	zero };
+let	ivmm15	=	{	male 	zero   zero 	zero	zero    zero  zero 	age1 	zero   zero 	zero	zero    ageNew2 zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	zero   	zero 	flxTmDm zero	zero   	zero 	zero   	zero 	zero  	zero   	zero	zero	zero   	zero   	zero 	zero    zero	zone	zero   	zero };
+let	ivmm16	=	{	zero 	male   zero 	zero	zero    zero  zero 	zero 	age1   zero 	zero	zero    zero 	ageNew2 zero 	zero	ageNew3 zero	zero  zero	incg3 	zero   	zero 	zero	zero 	zero   	zero 	zero    flxTmDm	zero   	zero 	zero   	zero 	zero  	zero   	frday	zero	zero   	zero   	zero 	zero    zero	zero	zero   	zero };
+let	ivmm17	=	{	zero 	zero   male 	zero	zero    zero  zero 	zero 	zero   age1 	zero	zero    zero 	zero   	ageNew2 zero	zero 	zero	zero  zero	zero 	incg3   zero 	zero	zero 	zero    zero 	zero    zero	flxTmDm zero 	zero   	urbDum 	zero  	zero   	zero	zero	zero    drvDum  zero 	zero    zero	zero	zone   	zero };
+let	ivmm18	=	{	zero 	zero   zero 	male	zero    zero  zero 	zero 	zero   zero 	age1	zero    zero 	zero   	zero 	ageNew2	zero 	zero	zero  zero	zero 	zero   	incg3 	zero	incg4 	zero   	zero 	zero    zero	zero    flxTmDm zero   	zero 	zero  	zero   	zero	frday	zero   	zero   	drvDum 	zero    zero	zero	zero   	zero };
+let	ivmm19	=	{	zero 	zero   zero 	zero	male    zero  zero 	zero 	zero   zero 	zero	zero    zero 	zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	incg4   zero 	zero    zero	zero    zero 	flxTmDm zero 	urbDum  zero   	zero	zero	zero   	zero   	zero 	drvDum  zero	zero	zero   	zone };
+*/
+
+let	ivmm11	=	{	zero 	zero   zero 	zero	zero 	zero  zero 	zero 	zero   zero 	zero	zero    zero 	zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	zero   	zero 	zero   	zero	zero   	zero 	zero   	zero 		zero  		zero   	zero	zero	zero   	zero   	zero 	zero  	zero	zero	zero   	zero };
+let	ivmm12	=	{	zero 	zero   zero 	zero	zero    zero  zero 	zero 	zero   zero 	zero	zero    zero 	zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	zero   	zero 	zero   	zero	zero   	zero 	zero   	zero 		zero  		zero   	zero	zero	zero   	zero   	zero 	zero    zero	zero	zero   	zero };
+let	ivmm13	=	{	zero 	zero   zero 	zero	zero    age1  zero 	zero 	zero   zero 	zero	ageNew2 zero 	zero   	zero 	zero	zero 	zero	incg3 zero	zero 	zero   	zero 	zero	zero 	zero   	flxTmDm zero   	zero	zero   	zero 	zero   	zero 		zero  		zero    zero	zero   	drvDum	zero   	zero 	zero    zone	zero	zero   	zero } ;
+let	ivmm14	=	{	zero 	zero   zero 	zero	zero    zero  age1 	zero 	zero   zero 	zero	zero    zero 	zero   	zero 	zero	zero 	incg2	zero  incg3	zero 	zero   	zero 	incg4	zero 	zero   	zero 	zero   	zero	zero   	zero 	zero   	zero 		zero    	frday   zero	zero	zero   	zero   	zero 	zero    zero	zero	zero   	zero };
+let	ivmm15	=	{	male 	zero   zero 	zero	zero    zero  zero 	age1 	zero   zero 	zero	zero    ageNew2 zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	zero   	zero 	flxTmDm zero	zero   	zero 	zero   	zero 		zero  		zero   	zero	zero	zero   	zero   	zero 	zero    zero	zone	zero   	zero };
+let	ivmm16	=	{	zero 	male   zero 	zero	zero    zero  zero 	zero 	age1   zero 	zero	zero    zero 	ageNew2 zero 	zero	ageNew3 zero	zero  zero	incg3 	zero   	zero 	zero	zero 	zero   	zero 	zero    flxTmDm	zero   	zero 	zero   	zero 		zero  		zero   	frday	zero	zero   	zero   	zero 	zero    zero	zero	zero   	zero };
+let	ivmm17	=	{	zero 	zero   male 	zero	zero    zero  zero 	zero 	zero   age1 	zero	zero    zero 	zero   	ageNew2 zero	zero 	zero	zero  zero	zero 	incg3   zero 	zero	zero 	zero    zero 	zero    zero	flxTmDm zero 	zero   	urbDum01 	zero  		zero   	zero	zero	zero    drvDum  zero 	zero    zero	zero	zone   	zero };
+let	ivmm18	=	{	zero 	zero   zero 	male	zero    zero  zero 	zero 	zero   zero 	age1	zero    zero 	zero   	zero 	ageNew2	zero 	zero	zero  zero	zero 	zero   	incg3 	zero	incg4 	zero   	zero 	zero    zero	zero    flxTmDm zero   	zero 		zero  		zero   	zero	frday	zero   	zero   	drvDum 	zero    zero	zero	zero   	zero };
+let	ivmm19	=	{	zero 	zero   zero 	zero	male    zero  zero 	zero 	zero   zero 	zero	zero    zero 	zero   	zero 	zero	zero 	zero	zero  zero	zero 	zero   	zero 	zero	zero 	incg4   zero 	zero    zero	zero    zero 	flxTmDm zero 		urbDum01  	zero   	zero	zero	zero   	zero   	zero 	drvDum  zero	zero	zero   	zone };
+
+
+@THIS IS FOR SCHOOL TOUR@
+/*let	ivmm21	=	{	zero 	zero 	zero   zero 	zero	zero	zero   	zero  	zero	};
+let	ivmm22	=	{	zero 	zero 	zero   zero 	zero	zero	zero   	zero  	zero	};
+let	ivmm23	=	{	male 	zero 	zero   zero 	incg3	zero	zero   	zero  	zero	};
+let	ivmm24	=	{	zero 	age1 	zero   zero 	zero	incg3	zero   	zero  	zero	};
+let	ivmm25	=	{	zero 	zero 	age1   zero 	zero	zero	incg3 	zero  	zero	};
+let	ivmm26	=	{	zero 	zero 	zero   age1 	zero	zero	zero   	zero  	urbDum	};
+let	ivmm27	=	{	zero 	zero 	zero   zero 	zero	zero	zero   	zero  	zero	};
+let	ivmm28	=	{	zero	zero 	zero   zero 	zero	zero	zero   	incg3 	zero	};
+*/
+
+@Changed urban dummy@
+let	ivmm21	=	{	zero 	zero 	zero   zero 	zero	zero	zero   	zero  	zero	};
+let	ivmm22	=	{	zero 	zero 	zero   zero 	zero	zero	zero   	zero  	zero	};
+let	ivmm23	=	{	male 	zero 	zero   zero 	incg3	zero	zero   	zero  	zero	};
+let	ivmm24	=	{	zero 	age1 	zero   zero 	zero	incg3	zero   	zero  	zero	};
+let	ivmm25	=	{	zero 	zero 	age1   zero 	zero	zero	incg3 	zero  	zero	};
+let	ivmm26	=	{	zero 	zero 	zero   age1 	zero	zero	zero   	zero  	urbDum01	};
+let	ivmm27	=	{	zero 	zero 	zero   zero 	zero	zero	zero   	zero  	zero	};
+let	ivmm28	=	{	zero	zero 	zero   zero 	zero	zero	zero   	incg3 	zero	};
+
+
+@THIS IS FOR ESCORT TOUR@
+/*let	ivmm31	=	{	zero 	zero   zero 	zero	zero 	zero 	zero   zero 	zero	zero 	zero 	zero	zero 	zero 	zero   	zero 	zero	zero   zero   zero   	zero 	zero	zero   		zero  	 };//zero		zero   		zero };
+let	ivmm32	=	{	zero 	zero   zero 	zero	zero    zero 	zero   zero 	zero	zero 	zero 	zero	zero 	zero 	zero   	zero 	zero	zero   zero   zero   	zero 	zero	zero   		zero  	 };//zero		zero   		zero };
+let	ivmm33	=	{	male 	zero   zero 	zero	zero    zero 	zero   zero 	zero	zero 	zero 	zero	zero 	zero 	incg3   zero 	zero	incg4  zero   zero   	zero 	zero	zone   		zero  	 };//drvDum		zero   		zero };
+let	ivmm34	=	{	zero 	male   zero 	zero	age1    zero 	zero   ageNew2 	zero	ageNew3 zero 	zero	zero 	zero 	zero   	zero 	zero	zero   zero   zero   	urbDum 	zero	zero   		zero 	 };//zero		zero   		zero };
+let	ivmm35	=	{	zero 	zero   male 	zero	zero    age1 	zero   zero 	zero	zero 	zero 	incg2	zero 	zero 	zero   	incg3 	zero	zero   incg4  zero   	zero 	zero	zero   		zero     };//zero		zero   		zero };
+let	ivmm36	=	{	zero 	zero   zero 	male	zero    zero 	age1   zero 	ageNew2	zero 	ageNew3 zero	incg2 	zero 	zero   	zero 	zero	zero   zero   zero   	zero 	zero	zero   		zone     };//zero		drvDum   	zero };
+let	ivmm37	=	{	zero 	zero   zero 	zero	zero    zero 	zero   zero 	zero	zero 	zero 	zero	zero 	incg2 	zero   	zero 	incg3	zero   zero   incg4   	zero 	urbDum	zero   		zero     };//zero		zero   		drvDum };
+*/
+
+@Urban dummy changed@
+let	ivmm31	=	{	zero 	zero   zero 	zero	zero 	zero 	zero   zero 	zero	zero 	zero 	zero	zero 	zero 	zero   	zero 	zero	zero   zero   zero   	zero 		zero		zero   		zero  	 };//zero		zero   		zero };
+let	ivmm32	=	{	zero 	zero   zero 	zero	zero    zero 	zero   zero 	zero	zero 	zero 	zero	zero 	zero 	zero   	zero 	zero	zero   zero   zero   	zero 		zero		zero   		zero  	 };//zero		zero   		zero };
+let	ivmm33	=	{	male 	zero   zero 	zero	zero    zero 	zero   zero 	zero	zero 	zero 	zero	zero 	zero 	incg3   zero 	zero	incg4  zero   zero   	zero 		zero		zone   		zero  	 };//drvDum		zero   		zero };
+let	ivmm34	=	{	zero 	male   zero 	zero	age1    zero 	zero   ageNew2 	zero	ageNew3 zero 	zero	zero 	zero 	zero   	zero 	zero	zero   zero   zero   	urbDum01 	zero		zero   		zero 	 };//zero		zero   		zero };
+let	ivmm35	=	{	zero 	zero   male 	zero	zero    age1 	zero   zero 	zero	zero 	zero 	incg2	zero 	zero 	zero   	incg3 	zero	zero   incg4  zero   	zero 		zero		zero   		zero     };//zero		zero   		zero };
+let	ivmm36	=	{	zero 	zero   zero 	male	zero    zero 	age1   zero 	ageNew2	zero 	ageNew3 zero	incg2 	zero 	zero   	zero 	zero	zero   zero   zero   	zero 		zero		zero   		zone     };//zero		drvDum   	zero };
+let	ivmm37	=	{	zero 	zero   zero 	zero	zero    zero 	zero   zero 	zero	zero 	zero 	zero	zero 	incg2 	zero   	zero 	incg3	zero   zero   incg4   	zero 		urbDum01	zero   		zero     };//zero		zero   		drvDum };
+
+
+@THIS IS FOR PERSONAL BUSINESS TOUR@
+/*let	ivmm41	=	{	zero   zero 	zero   zero 	zero   zero 	zero  	zero 		zero     zero 	   zero     zero 	   zero    zero   zero 	   zero    };
+let	ivmm42	=	{	zero   zero 	zero   zero 	zero   zero 	zero  	zero 		zero     zero 	   zero 	zero 	   zero    zero   zero     zero    };
+let	ivmm43	=	{	zero   zero 	zero   age1 	zero   ageNew2 	zero  	zero 	    ageNew3  zero 	   zero     zero 	   zero    frday  zero     zone    };
+let	ivmm44	=	{	male   zero 	zero   zero 	zero   zero 	ageNew2 zero 		zero  	 zero 	   zero 	urbDum     zero    zero   zero     zero    };
+let	ivmm45	=	{	zero   male 	zero   zero 	age1   zero 	zero  	zero 		zero     zero 	   zero 	zero       urbDum  zero   frday    zero    };
+let	ivmm46	=	{	zero   zero 	male   zero 	zero   zero 	zero  	ageNew2 	zero     ageNew3   incg4 	zero       zero    zero   zero     zero    };
+*/
+
+@Changed urban dummy@
+let	ivmm41	=	{	zero   zero 	zero   zero 	zero   zero 	zero  	zero 		zero     zero 	   zero     zero 	   zero    	zero   zero 	zero    };
+let	ivmm42	=	{	zero   zero 	zero   zero 	zero   zero 	zero  	zero 		zero     zero 	   zero 	zero 	   zero    	zero   zero     zero    };
+let	ivmm43	=	{	zero   zero 	zero   age1 	zero   ageNew2 	zero  	zero 	    ageNew3  zero 	   zero     zero 	   zero    	frday  zero     zone    };
+let	ivmm44	=	{	male   zero 	zero   zero 	zero   zero 	ageNew2 zero 		zero  	 zero 	   zero 	urbDum01   zero    	zero   zero     zero    };
+let	ivmm45	=	{	zero   male 	zero   zero 	age1   zero 	zero  	zero 		zero     zero 	   zero 	zero       urbDum01 zero   frday    zero    };
+let	ivmm46	=	{	zero   zero 	male   zero 	zero   zero 	zero  	ageNew2 	zero     ageNew3   incg4 	zero       zero     zero   zero     zero    };
+
+
+
+@THIS IS FOR SHOP TOUR@
+let	ivmm51	=	{	zero 	zero 	zero 	zero 	zero 	zero 	zero  zero 	zero 	zero 	zero 	zero 	zero 	};
+let	ivmm52	=	{	zero 	zero 	zero  	zero 	zero 	zero 	zero  zero 	zero 	zero 	zero 	zero 	zero 	};
+let	ivmm53	=	{	zero 	ageNew2 zero    ageNew3 zero 	incg2 	zero  incg3 zero 	incg4 	zero 	zero 	drvdum 	};
+let	ivmm54	=	{	zero  	zero 	zero  	zero 	zero 	zero 	zero  zero 	incg3 	zero 	incg4 	frday 	zero 	};
+let	ivmm55	=	{	age1 	zero 	ageNew2 zero 	ageNew3 zero 	incg2 zero 	zero 	zero 	zero 	zero 	zero 	};
+
+@THIS IS FOR MEAL TOUR@
+/*let	ivmm61	=	{	zero 	zero 	zero 	zero 	zero 	zero 	zero 	};
+let	ivmm62	=	{	zero 	zero 	zero    zero 	zero 	zero 	zero 	};
+let	ivmm63	=	{	ageNew3 zero 	incg3   incg4   urbDum 	zero 	zone 	};
+let	ivmm64	=	{	zero 	incg2 	zero   	zero    zero 	zero 	zero 	};
+let	ivmm65	=	{	zero 	zero	zero    zero   	zero 	urbDum 	zero 	};
+*/
+
+@Changes urban dummy@
+let	ivmm61	=	{	zero 	zero 	zero 	zero 	zero 		zero 		zero 	};
+let	ivmm62	=	{	zero 	zero 	zero    zero 	zero 		zero 		zero 	};
+let	ivmm63	=	{	ageNew3 zero 	incg3   incg4   urbDum01 	zero 		zone 	};
+let	ivmm64	=	{	zero 	incg2 	zero   	zero    zero 		zero 		zero 	};
+let	ivmm65	=	{	zero 	zero	zero    zero   	zero 		urbDum01 	zero 	};
+
+
+@THIS IS FOR SOCIAL RECREATION TOUR@
+/*let	ivmm71	=	{	zero    zero	zero 	zero  	};
+let	ivmm72	=	{	zero   	zero 	zero 	zero  	};
+let	ivmm73	=	{	male    incg2   drvDum 	zero  	};
+let	ivmm74	=	{	zero   	zero 	zero 	urbDum  };
+let	ivmm75	=	{	zero   	zero 	zero 	zero 	};
+*/
+
+@Changed urban dummy@
+let	ivmm71	=	{	zero    zero	zero 	zero  	};
+let	ivmm72	=	{	zero   	zero 	zero 	zero  	};
+let	ivmm73	=	{	male    incg2   drvDum 	zero  	};
+let	ivmm74	=	{	zero   	zero 	zero 	urbDum01  };
+let	ivmm75	=	{	zero   	zero 	zero 	zero 	};
+
+
+{ vm11,ivmmt11 } = indices(dataset,ivmm11');
+{ vm12,ivmmt12 } = indices(dataset,ivmm12');
+{ vm13,ivmmt13 } = indices(dataset,ivmm13');
+{ vm14,ivmmt14 }   = indices(dataset,ivmm14');
+{ vm15,ivmmt15 }   = indices(dataset,ivmm15');
+{ vm16,ivmmt16 }   = indices(dataset,ivmm16');
+{ vm17,ivmmt17 }   = indices(dataset,ivmm17');
+{ vm18,ivmmt18 }   = indices(dataset,ivmm18');
+{ vm19,ivmmt19 }   = indices(dataset,ivmm19');
+
+{ vm21,ivmmt21 } = indices(dataset,ivmm21');
+{ vm22,ivmmt22 } = indices(dataset,ivmm22');
+{ vm23,ivmmt23 } = indices(dataset,ivmm23');
+{ vm24,ivmmt24 }   = indices(dataset,ivmm24');
+{ vm25,ivmmt25 }   = indices(dataset,ivmm25');
+{ vm26,ivmmt26 }   = indices(dataset,ivmm26');
+{ vm27,ivmmt27 }   = indices(dataset,ivmm27');
+{ vm28,ivmmt28 }   = indices(dataset,ivmm28');
+
+{ vm31,ivmmt31 } = indices(dataset,ivmm31');
+{ vm32,ivmmt32 } = indices(dataset,ivmm32');
+{ vm33,ivmmt33 } = indices(dataset,ivmm33');
+{ vm34,ivmmt34 }   = indices(dataset,ivmm34');
+{ vm35,ivmmt35 }   = indices(dataset,ivmm35');
+{ vm36,ivmmt36 }   = indices(dataset,ivmm36');
+{ vm37,ivmmt37 }   = indices(dataset,ivmm37');
+
+{ vm41,ivmmt41 } = indices(dataset,ivmm41');
+{ vm42,ivmmt42 } = indices(dataset,ivmm42');
+{ vm43,ivmmt43 } = indices(dataset,ivmm43');
+{ vm44,ivmmt44 }   = indices(dataset,ivmm44');
+{ vm45,ivmmt45 }   = indices(dataset,ivmm45');
+{ vm46,ivmmt46 }   = indices(dataset,ivmm46');
+
+
+{ vm51,ivmmt51 } = indices(dataset,ivmm51');
+{ vm52,ivmmt52 } = indices(dataset,ivmm52');
+{ vm53,ivmmt53 } = indices(dataset,ivmm53');
+{ vm54,ivmmt54 }   = indices(dataset,ivmm54');
+{ vm55,ivmmt55 }   = indices(dataset,ivmm55');
+
+
+{ vm61,ivmmt61 } = indices(dataset,ivmm61');
+{ vm62,ivmmt62 } = indices(dataset,ivmm62');
+{ vm63,ivmmt63 } = indices(dataset,ivmm63');
+{ vm64,ivmmt64 }   = indices(dataset,ivmm64');
+{ vm65,ivmmt65 }   = indices(dataset,ivmm65');
+
+
+{ vm71,ivmmt71 } = indices(dataset,ivmm71');
+{ vm72,ivmmt72 } = indices(dataset,ivmm72');
+{ vm73,ivmmt73 } = indices(dataset,ivmm73');
+{ vm74,ivmmt74 }   = indices(dataset,ivmm74');
+{ vm75,ivmmt75 }   = indices(dataset,ivmm75');
+
+
+/*******END OF DEFINITION OF BASSELINE UTILITY FOR TOP AND BOTTOM NEST*************************/
+
+
+/* In the following specification, ivd1, ivd2, ivd3 contain input data specifications (on right hand side) for satiation parameters (Alphas) for alternatives 1, 2 and 3
+   Add a row below for ivd4 if there is a 4th alternative, another additional row for ivd5 if there is a 5th alternative,.... (number of rows = number of alternatives)
+   Number of columns = Number of alternatives.
+   Note that you can also add individual-specific variables below, so that satiation varies across individuals; However, you will then have to translate outputs to compute actual alpha parameters.
+   This code is written to provide you with the alpha parameters directly for the case when there is no variation in alpha across individuals */
+
+@THIS IS FOR THE TOP NEST@
+
+let	ivd1	=	{	uno 	zero	zero	zero	zero 	zero 	zero 	zero };
+let	ivd2	=	{	zero	uno 	zero	zero	zero 	zero 	zero 	zero };
+let	ivd3	=	{	zero	zero	uno 	zero	zero 	zero 	zero 	zero };
+let	ivd4	=	{	zero	zero	zero	uno	    zero 	zero 	zero 	zero };
+let	ivd5	=	{	zero	zero	zero	zero	uno	 	zero 	zero 	zero };
+let	ivd6	=	{	zero	zero	zero 	zero	zero 	uno 	zero 	zero };
+let	ivd7	=	{	zero	zero	zero	zero	zero 	zero 	uno 	zero };
+let	ivd8	=	{	zero	zero	zero	zero	zero	zero 	zero 	uno };
+
+/*Alpha = 1-exp(Delta) if Alpha < 1
+Alpha = 1-(1/(1+exp(Delta))) if 0 < Alpha < 1   */
+//Add a row for w4 below if there is a 4th alternative,..... (number of rows = number of alternatives)
+
+{ w1,ivdt1 }   = indices(dataset,ivd1');
+{ w2,ivdt2 }   = indices(dataset,ivd2');
+{ w3,ivdt3 }   = indices(dataset,ivd3');
+{ w4,ivdt4 }   = indices(dataset,ivd4');
+{ w5,ivdt5 }   = indices(dataset,ivd5');
+{ w6,ivdt6 }   = indices(dataset,ivd6');
+{ w7,ivdt7 }   = indices(dataset,ivd7');
+{ w8,ivdt8 }   = indices(dataset,ivd8');
+
+
+/********DEFINE ivd FOR THE BOTTOM NESTS********************************************/
+
+@WORK NEST@
+let	ivd11	=	{	uno 	zero	zero	zero	zero 	zero 	zero 	zero  zero };
+let	ivd12	=	{	zero	uno 	zero	zero	zero 	zero 	zero 	zero  zero };
+let	ivd13	=	{	zero	zero	uno 	zero	zero 	zero 	zero 	zero  zero };
+let	ivd14	=	{	zero	zero	zero	uno	    zero 	zero 	zero 	zero  zero };
+let	ivd15	=	{	zero	zero	zero	zero	uno	 	zero 	zero 	zero  zero };
+let	ivd16	=	{	zero	zero	zero 	zero	zero 	uno 	zero 	zero  zero };
+let	ivd17	=	{	zero	zero	zero	zero	zero 	zero 	uno 	zero  zero };
+let	ivd18	=	{	zero	zero	zero	zero	zero	zero 	zero 	uno   zero };
+let	ivd19	=	{	zero	zero	zero	zero	zero	zero 	zero 	zero  uno };
+
+@SCHOOL NEST@
+let	ivd21	=	{	uno 	zero	zero	zero	zero 	zero 	zero 	zero  };
+let	ivd22	=	{	zero	uno 	zero	zero	zero 	zero 	zero 	zero  };
+let	ivd23	=	{	zero	zero	uno 	zero	zero 	zero 	zero 	zero  };
+let	ivd24	=	{	zero	zero	zero	uno	    zero 	zero 	zero 	zero  };
+let	ivd25	=	{	zero	zero	zero	zero	uno	 	zero 	zero 	zero  };
+let	ivd26	=	{	zero	zero	zero 	zero	zero 	uno 	zero 	zero  };
+let	ivd27	=	{	zero	zero	zero	zero	zero 	zero 	uno 	zero  };
+let	ivd28	=	{	zero	zero	zero	zero	zero	zero 	zero 	uno   };
+
+@Escort@
+let	ivd31	=	{	uno 	zero	zero	zero	zero 	zero 	zero 	};
+let	ivd32	=	{	zero	uno 	zero	zero	zero 	zero 	zero 	};
+let	ivd33	=	{	zero	zero	uno 	zero	zero 	zero 	zero 	};
+let	ivd34	=	{	zero	zero	zero	uno	    zero 	zero 	zero 	};
+let	ivd35	=	{	zero	zero	zero	zero	uno	 	zero 	zero 	};
+let	ivd36	=	{	zero	zero	zero 	zero	zero 	uno 	zero 	};
+let	ivd37	=	{	zero	zero	zero	zero	zero 	zero 	uno 	};
+
+@PERSONAL BUSINESS@
+let	ivd41	=	{	uno 	zero	zero	zero	zero 	zero 	};
+let	ivd42	=	{	zero	uno 	zero	zero	zero 	zero 	};
+let	ivd43	=	{	zero	zero	uno 	zero	zero 	zero 	};
+let	ivd44	=	{	zero	zero	zero	uno	    zero 	zero 	};
+let	ivd45	=	{	zero	zero	zero	zero	uno	 	zero 	};
+let	ivd46	=	{	zero	zero	zero 	zero	zero 	uno 	};
+
+@SHOPPING@
+let	ivd51	=	{	uno 	zero	zero	zero	zero 	};
+let	ivd52	=	{	zero	uno 	zero	zero	zero 	};
+let	ivd53	=	{	zero	zero	uno 	zero	zero 	};
+let	ivd54	=	{	zero	zero	zero	uno	    zero 	};
+let	ivd55	=	{	zero	zero	zero	zero	uno	 	};
+
+@MEAL@
+let	ivd61	=	{	uno 	zero	zero	zero	zero 	};
+let	ivd62	=	{	zero	uno 	zero	zero	zero 	};
+let	ivd63	=	{	zero	zero	uno 	zero	zero 	};
+let	ivd64	=	{	zero	zero	zero	uno	    zero 	};
+let	ivd65	=	{	zero	zero	zero	zero	uno	 	};
+
+@SOCIAL RECREATION@
+let	ivd71	=	{	uno 	zero	zero	zero	zero 	};
+let	ivd72	=	{	zero	uno 	zero	zero	zero 	};
+let	ivd73	=	{	zero	zero	uno 	zero	zero 	};
+let	ivd74	=	{	zero	zero	zero	uno	    zero 	};
+let	ivd75	=	{	zero	zero	zero	zero	uno	 	};
+
+@Work@
+{ w11,ivdt11 }   = indices(dataset,ivd11');
+{ w12,ivdt12 }   = indices(dataset,ivd12');
+{ w13,ivdt13 }   = indices(dataset,ivd13');
+{ w14,ivdt14 }   = indices(dataset,ivd14');
+{ w15,ivdt15 }   = indices(dataset,ivd15');
+{ w16,ivdt16 }   = indices(dataset,ivd16');
+{ w17,ivdt17 }   = indices(dataset,ivd17');
+{ w18,ivdt18 }   = indices(dataset,ivd18');
+{ w19,ivdt19 }   = indices(dataset,ivd19');
+
+@School@
+{ w21,ivdt21 }   = indices(dataset,ivd21');
+{ w22,ivdt22 }   = indices(dataset,ivd22');
+{ w23,ivdt23 }   = indices(dataset,ivd23');
+{ w24,ivdt24 }   = indices(dataset,ivd24');
+{ w25,ivdt25 }   = indices(dataset,ivd25');
+{ w26,ivdt26 }   = indices(dataset,ivd26');
+{ w27,ivdt27 }   = indices(dataset,ivd27');
+{ w28,ivdt28 }   = indices(dataset,ivd28');
+
+@Escort@
+{ w31,ivdt31 }   = indices(dataset,ivd31');
+{ w32,ivdt32 }   = indices(dataset,ivd32');
+{ w33,ivdt33 }   = indices(dataset,ivd33');
+{ w34,ivdt34 }   = indices(dataset,ivd34');
+{ w35,ivdt35 }   = indices(dataset,ivd35');
+{ w36,ivdt36 }   = indices(dataset,ivd36');
+{ w37,ivdt37 }   = indices(dataset,ivd37');
+
+@Personal Business@
+{ w41,ivdt41 }   = indices(dataset,ivd41');
+{ w42,ivdt42 }   = indices(dataset,ivd42');
+{ w43,ivdt43 }   = indices(dataset,ivd43');
+{ w44,ivdt44 }   = indices(dataset,ivd44');
+{ w45,ivdt45 }   = indices(dataset,ivd45');
+{ w46,ivdt46 }   = indices(dataset,ivd46');
+
+@Shopping@
+{ w51,ivdt51 }   = indices(dataset,ivd51');
+{ w52,ivdt52 }   = indices(dataset,ivd52');
+{ w53,ivdt53 }   = indices(dataset,ivd53');
+{ w54,ivdt54 }   = indices(dataset,ivd54');
+{ w55,ivdt55 }   = indices(dataset,ivd55');
+
+@Meal@
+{ w61,ivdt61 }   = indices(dataset,ivd61');
+{ w62,ivdt62 }   = indices(dataset,ivd62');
+{ w63,ivdt63 }   = indices(dataset,ivd63');
+{ w64,ivdt64 }   = indices(dataset,ivd64');
+{ w65,ivdt65 }   = indices(dataset,ivd65');
+
+@Social Recreation@
+{ w71,ivdt71 }   = indices(dataset,ivd71');
+{ w72,ivdt72 }   = indices(dataset,ivd72');
+{ w73,ivdt73 }   = indices(dataset,ivd73');
+{ w74,ivdt74 }   = indices(dataset,ivd74');
+{ w75,ivdt75 }   = indices(dataset,ivd75');
+
+
+/*********************END OF DEFINITION OF ivd FOR THE BOTTOM NESTS***************************************/
+
+/* In the following specification, ivg1, ivg2, ivg3 contain input data specifications (on the right hand side) for translation parameters (Gammas) for alternatives 1, 2 and 3
+   Add a row for ivg4 if there is a 4th alternative another additional row for ivd5 if there is a 5th alternative,.... (number of rows = number of alternatives)
+   Number of columns = Number of alternatives; Note that you can also add individual-specific variables below, so that gamma varies across individuals
+   However, you will then have to translate outputs to compute actual gamma parameters
+   This code is written to provide you with the gamma parameters directly for the case when there is no variation in gamma across individuals */
+
+@Top nest@
+/*let	ivg1	=	{	uno 	zero	zero	zero	zero 	zero 	zero 	zero 	zero	zero 	zero 	zero 	zero 	zero 	zero  	zero  	zero  	zero  zero  zero		zero	zero 	zero 	zero 	zero  	zero 	zero	zero	zero	zero 	zero 	zero };
+let	ivg2	=	{	zero	uno 	zero	zero	zero 	zero 	zero 	zero 	male	zero 	zero 	zero 	age1 	zero 	ageNew2 zero  	zero  	zero  zero  wPrtDum		zero	urbDum 	zero 	zero 	zero  	zero 	zone	zero	zero	zero 	zero 	zero };
+let	ivg3	=	{	zero	zero	uno 	zero	zero 	zero 	zero 	zero 	zero	zero 	zero 	zero 	zero 	age1 	zero  	zero  	zero  	zero  zero  zero		zero	zero 	zero 	zero 	zero  	zero 	zero	zone	zero	zero 	zero 	zero };
+let	ivg4	=	{	zero	zero	zero	uno	    zero 	zero 	zero 	zero 	zero	zero 	zero 	zero 	zero 	zero 	zero  	ageNew2 zero  	incg2 zero  zero		zero	zero 	zero 	zero 	zero  	zero 	zero	zero	zone	zero 	zero 	zero };
+let	ivg5	=	{	zero	zero	zero	zero	uno	 	zero 	zero 	zero 	zero	male 	zero 	zero 	zero 	zero 	zero  	zero  	zero  	zero  zero  zero		wPrtDum	zero 	urbDum 	zero 	zero  	zero 	zero	zero	zero	zero 	zero 	zero };
+let	ivg6	=	{	zero	zero	zero 	zero	zero 	uno 	zero 	zero 	zero	zero 	male 	zero 	zero 	zero 	zero  	zero  	ageNew2 zero  zero  zero		zero	zero 	zero 	urbDum 	zero  	zero 	zero	zero	zero	zone 	zero 	zero };
+let	ivg7	=	{	zero	zero	zero	zero	zero 	zero 	uno 	zero 	zero	zero 	zero 	male 	zero 	zero 	zero  	zero  	zero  	zero  incg4 zero		zero	zero 	zero 	zero 	zero  	zero 	zero	zero	zero	zero 	zone 	zero };
+let	ivg8	=	{	zero	zero	zero	zero	zero	zero 	zero 	uno 	zero	zero 	zero 	zero 	zero 	zero 	zero  	zero  	zero  	zero  zero  zero		zero	zero 	zero 	zero 	urbDum 	frday 	zero	zero	zero	zero 	zero 	zone };
+*/
+
+
+@Converted urban dummies@
+let	ivg1	=	{	uno 	zero	zero	zero	zero 	zero 	zero 	zero 	zero	zero 	zero 	zero 	zero 	zero 	zero  	zero  	zero  	zero  zero  zero		zero	zero 		zero 		zero 		zero  		zero 	zero	zero	zero	zero 	zero 	zero };
+let	ivg2	=	{	zero	uno 	zero	zero	zero 	zero 	zero 	zero 	male	zero 	zero 	zero 	age1 	zero 	ageNew2 zero  	zero  	zero  zero  wPrtDum		zero	urbDum01 	zero 		zero 		zero  		zero 	zone	zero	zero	zero 	zero 	zero };
+let	ivg3	=	{	zero	zero	uno 	zero	zero 	zero 	zero 	zero 	zero	zero 	zero 	zero 	zero 	age1 	zero  	zero  	zero  	zero  zero  zero		zero	zero 		zero 		zero 		zero  		zero 	zero	zone	zero	zero 	zero 	zero };
+let	ivg4	=	{	zero	zero	zero	uno	    zero 	zero 	zero 	zero 	zero	zero 	zero 	zero 	zero 	zero 	zero  	ageNew2 zero  	incg2 zero  zero		zero	zero 		zero 		zero 		zero  		zero 	zero	zero	zone	zero 	zero 	zero };
+let	ivg5	=	{	zero	zero	zero	zero	uno	 	zero 	zero 	zero 	zero	male 	zero 	zero 	zero 	zero 	zero  	zero  	zero  	zero  zero  zero		wPrtDum	zero 		urbDum01 	zero 		zero  		zero 	zero	zero	zero	zero 	zero 	zero };
+let	ivg6	=	{	zero	zero	zero 	zero	zero 	uno 	zero 	zero 	zero	zero 	male 	zero 	zero 	zero 	zero  	zero  	ageNew2 zero  zero  zero		zero	zero 		zero 		urbDum01 	zero  		zero 	zero	zero	zero	zone 	zero 	zero };
+let	ivg7	=	{	zero	zero	zero	zero	zero 	zero 	uno 	zero 	zero	zero 	zero 	male 	zero 	zero 	zero  	zero  	zero  	zero  incg4 zero		zero	zero 		zero 		zero 		zero  		zero 	zero	zero	zero	zero 	zone 	zero };
+let	ivg8	=	{	zero	zero	zero	zero	zero	zero 	zero 	uno 	zero	zero 	zero 	zero 	zero 	zero 	zero  	zero  	zero  	zero  zero  zero		zero	zero 		zero 		zero 		urbDum01 	frday 	zero	zero	zero	zero 	zero 	zone };
+
+
+
+//Add a row for u4 below if there is a 4th alternative,... (number of rows = number of alternatives)
+{ u1,ivgt1 }   = indices(dataset,ivg1');
+{ u2,ivgt2 }   = indices(dataset,ivg2');
+{ u3,ivgt3 }   = indices(dataset,ivg3');
+{ u4,ivgt4 }   = indices(dataset,ivg4');
+{ u5,ivgt5 }   = indices(dataset,ivg5');
+{ u6,ivgt6 }   = indices(dataset,ivg6');
+{ u7,ivgt7 }   = indices(dataset,ivg7');
+{ u8,ivgt8 }   = indices(dataset,ivg8');
+
+
+/********DEFINITION OF ivg FOR THE BOTTOM NESTS*************************************/
+@WORK@
+let	ivg11	=	{	uno 	zero	zero	zero	zero 	zero 	zero 	zero 	zero  	zero	zero	zero 	zero 	zero		zero	zero		};
+let	ivg12	=	{	zero	uno 	zero	zero	zero 	zero 	zero 	zero 	zero 	zero	zero	zero 	zero 	zero		zero	zero		};
+let	ivg13	=	{	zero	zero	uno 	zero	zero 	zero 	zero 	zero 	zero    zero	zero	zero 	zero 	zero		zero	zero		};
+let	ivg14	=	{	zero	zero	zero	uno	    zero 	zero 	zero 	zero 	zero    male	zero	zero 	zero 	frday		zero	zero		};
+let	ivg15	=	{	zero	zero	zero	zero	uno	 	zero 	zero 	zero 	zero    zero	incg2	zero 	zero 	zero		zero	zero		};
+let	ivg16	=	{	zero	zero	zero 	zero	zero 	uno 	zero 	zero 	zero    zero	zero	incg2 	zero 	zero		zero	zero		};
+let	ivg17	=	{	zero	zero	zero	zero	zero 	zero 	uno 	zero 	zero    zero	zero	zero 	zero 	zero		zero	zone		};
+let	ivg18	=	{	zero	zero	zero	zero	zero	zero 	zero 	uno 	zero    zero	zero	zero 	incg2 	zero		zero	zero		};
+let	ivg19	=	{	zero	zero	zero	zero	zero	zero 	zero 	zero 	uno     zero	zero	zero 	zero 	zero		frday	zero		};
+
+@SCHOOL@
+let	ivg21	=	{	uno 	zero	zero	zero	zero 	zero 	zero 	zero 	zero	zero	zero 	};
+let	ivg22	=	{	zero	uno 	zero	zero	zero 	zero 	zero 	zero 	zero	zero	zero 	};
+let	ivg23	=	{	zero	zero	uno 	zero	zero 	zero 	zero 	zero 	male	zero	zero 	};
+let	ivg24	=	{	zero	zero	zero	uno	    zero 	zero 	zero 	zero 	zero	zero	zero 	};
+let	ivg25	=	{	zero	zero	zero	zero	uno	 	zero 	zero 	zero 	zero	zero	zero 	};
+let	ivg26	=	{	zero	zero	zero 	zero	zero 	uno 	zero 	zero 	zero	zero	zero 	};
+let	ivg27	=	{	zero	zero	zero	zero	zero 	zero 	uno 	zero 	zero	male	zero 	};
+let	ivg28	=	{	zero	zero	zero	zero	zero	zero 	zero 	uno 	zero	zero	male 	};
+
+
+@ESCORT@
+let	ivg31	=	{	uno 	zero	zero	zero	zero 	zero 	zero 	zero	zero 	};
+let	ivg32	=	{	zero	uno 	zero	zero	zero 	zero 	zero 	zero	zero 	};
+let	ivg33	=	{	zero	zero	uno 	zero	zero 	zero 	zero 	male	zero 	};
+let	ivg34	=	{	zero	zero	zero	uno	    zero 	zero 	zero 	zero	zero 	};
+let	ivg35	=	{	zero	zero	zero	zero	uno	 	zero 	zero 	zero	zero 	};
+let	ivg36	=	{	zero	zero	zero 	zero	zero 	uno 	zero 	zero	male 	};
+let	ivg37	=	{	zero	zero	zero	zero	zero 	zero 	uno 	zero	zero 	};
+
+@PERSONAL BUSINESS@
+let	ivg41	=	{	uno 	zero	zero	zero	zero 	zero    zero	zero	zero 	zero 	zero 	};
+let	ivg42	=	{	zero	uno 	zero	zero	zero 	zero 	zero	zero	zero 	zero 	zero 	};
+let	ivg43	=	{	zero	zero	uno 	zero	zero 	zero 	male	zero	zero 	zero 	zero 	};
+let	ivg44	=	{	zero	zero	zero	uno	    zero 	zero 	zero	zero	zero 	zero 	frday   };
+let	ivg45	=	{	zero	zero	zero	zero	uno	 	zero 	zero	male	age1 	ageNew2 zero 	};
+let	ivg46	=	{	zero	zero	zero 	zero	zero 	uno 	zero	zero	zero 	zero 	zero 	};
+
+@SHOP@
+let	ivg51	=	{	uno 	zero	zero	zero	zero 	};
+let	ivg52	=	{	zero	uno 	zero	zero	zero 	};
+let	ivg53	=	{	zero	zero	uno 	zero	zero 	};
+let	ivg54	=	{	zero	zero	zero	uno	    zero 	};
+let	ivg55	=	{	zero	zero	zero	zero	uno	 	};
+
+@MEAL@
+let	ivg61	=	{	uno 	zero	zero	zero	zero 	};
+let	ivg62	=	{	zero	uno 	zero	zero	zero 	};
+let	ivg63	=	{	zero	zero	uno 	zero	zero 	};
+let	ivg64	=	{	zero	zero	zero	uno	    zero 	};
+let	ivg65	=	{	zero	zero	zero	zero	uno	 	};
+
+
+@SOCIAL RECREATION@
+let	ivg71	=	{	uno 	zero	zero	zero	zero 	zero	zero	zero  	zero  	zero  	zero  	 };
+let	ivg72	=	{	zero	uno 	zero	zero	zero 	zero	zero	zero  	zero  	zero  	zero  	 };
+let	ivg73	=	{	zero	zero	uno 	zero	zero 	male	zero	ageNew3 incg2  	incg4  	frday  	 };
+let	ivg74	=	{	zero	zero	zero	uno	    zero 	zero	zero	zero  	zero  	zero  	zero  	 };
+let	ivg75	=	{	zero	zero	zero	zero	uno	 	zero	male	zero  	zero  	zero  	zero  	 };
+
+
+@WORK Tour@
+{ u11,ivgt11 }   = indices(dataset,ivg11');
+{ u12,ivgt12 }   = indices(dataset,ivg12');
+{ u13,ivgt13 }   = indices(dataset,ivg13');
+{ u14,ivgt14 }   = indices(dataset,ivg14');
+{ u15,ivgt15 }   = indices(dataset,ivg15');
+{ u16,ivgt16 }   = indices(dataset,ivg16');
+{ u17,ivgt17 }   = indices(dataset,ivg17');
+{ u18,ivgt18 }   = indices(dataset,ivg18');
+{ u19,ivgt19 }   = indices(dataset,ivg19');
+
+@SCHOOL@
+{ u21,ivgt21 }   = indices(dataset,ivg21');
+{ u22,ivgt22 }   = indices(dataset,ivg22');
+{ u23,ivgt23 }   = indices(dataset,ivg23');
+{ u24,ivgt24 }   = indices(dataset,ivg24');
+{ u25,ivgt25 }   = indices(dataset,ivg25');
+{ u26,ivgt26 }   = indices(dataset,ivg26');
+{ u27,ivgt27 }   = indices(dataset,ivg27');
+{ u28,ivgt28 }   = indices(dataset,ivg28');
+
+@ESCORT@
+{ u31,ivgt31 }   = indices(dataset,ivg31');
+{ u32,ivgt32 }   = indices(dataset,ivg32');
+{ u33,ivgt33 }   = indices(dataset,ivg33');
+{ u34,ivgt34 }   = indices(dataset,ivg34');
+{ u35,ivgt35 }   = indices(dataset,ivg35');
+{ u36,ivgt36 }   = indices(dataset,ivg36');
+{ u37,ivgt37 }   = indices(dataset,ivg37');
+
+@PERSONAL BUSINESS@
+{ u41,ivgt41 }   = indices(dataset,ivg41');
+{ u42,ivgt42 }   = indices(dataset,ivg42');
+{ u43,ivgt43 }   = indices(dataset,ivg43');
+{ u44,ivgt44 }   = indices(dataset,ivg44');
+{ u45,ivgt45 }   = indices(dataset,ivg45');
+{ u46,ivgt46 }   = indices(dataset,ivg46');
+
+@SHOP@
+{ u51,ivgt51 }   = indices(dataset,ivg51');
+{ u52,ivgt52 }   = indices(dataset,ivg52');
+{ u53,ivgt53 }   = indices(dataset,ivg53');
+{ u54,ivgt54 }   = indices(dataset,ivg54');
+{ u55,ivgt55 }   = indices(dataset,ivg55');
+
+@MEAL@
+{ u61,ivgt61 }   = indices(dataset,ivg61');
+{ u62,ivgt62 }   = indices(dataset,ivg62');
+{ u63,ivgt63 }   = indices(dataset,ivg63');
+{ u64,ivgt64 }   = indices(dataset,ivg64');
+{ u65,ivgt65 }   = indices(dataset,ivg65');
+
+@SOCIAL RECREATION@
+{ u71,ivgt71 }   = indices(dataset,ivg71');
+{ u72,ivgt72 }   = indices(dataset,ivg72');
+{ u73,ivgt73 }   = indices(dataset,ivg73');
+{ u74,ivgt74 }   = indices(dataset,ivg74');
+{ u75,ivgt75 }   = indices(dataset,ivg75');
+
+/*********END OF DEFINITION OF ivg FOR THE BOTTOM NESTS******************/
+
+ivmt = ivmt1'~ivmt2'~ivmt3'~ivmt4'~ivmt5'~ivmt6'~ivmt7'~ivmt8';  // TOP LEVEL
+ivdt = ivdt1'~ivdt2'~ivdt3'~ivdt4'~ivdt5'~ivdt6'~ivdt7'~ivdt8';  // TOP LEVEL
+ivgt = ivgt1'~ivgt2'~ivgt3'~ivgt4'~ivgt5'~ivgt6'~ivgt7'~ivgt8';  // TOP LEVEL
+
+
+/************DEFINITION FOR THE BOTTOM NEST**********/
+ivmb1 = ivmt11'~ivmt12'~ivmt13'~ivmt14'~ivmt15'~ivmt16'~ivmt17'~ivmt18'~ivmt19';  // WORK TOUR
+ivmb2 = ivmt21'~ivmt22'~ivmt23'~ivmt24'~ivmt25'~ivmt26'~ivmt27'~ivmt28';        // SCHOOL TOUR
+ivmb3 = ivmt31'~ivmt32'~ivmt33'~ivmt34'~ivmt35'~ivmt36'~ivmt37';        // ESCORT TOUR
+ivmb4 = ivmt41'~ivmt42'~ivmt43'~ivmt44'~ivmt45'~ivmt46';		// PERSONAL BUSINESS
+ivmb5 = ivmt51'~ivmt52'~ivmt53'~ivmt54'~ivmt55';		// SHOP
+ivmb6 = ivmt61'~ivmt62'~ivmt63'~ivmt64'~ivmt65';		// MEAL
+ivmb7 = ivmt71'~ivmt72'~ivmt73'~ivmt74'~ivmt75';		// SOCIAL RECREATION
+
+ivmb = ivmb1~ivmb2~ivmb3~ivmb4~ivmb5~ivmb6~ivmb7;  //print "ivmb: " ivmb;
+
+
+/*******************DEFINITION OF THE BOTTOM NEST FOR THE TOP NEST************************/
+ivmmb1 = ivmmt11'~ivmmt12'~ivmmt13'~ivmmt14'~ivmmt15'~ivmmt16'~ivmmt17'~ivmmt18'~ivmmt19';  // WORK TOUR
+ivmmb2 = ivmmt21'~ivmmt22'~ivmmt23'~ivmmt24'~ivmmt25'~ivmmt26'~ivmmt27'~ivmmt28';        // SCHOOL TOUR
+ivmmb3 = ivmmt31'~ivmmt32'~ivmmt33'~ivmmt34'~ivmmt35'~ivmmt36'~ivmmt37';        // ESCORT TOUR
+ivmmb4 = ivmmt41'~ivmmt42'~ivmmt43'~ivmmt44'~ivmmt45'~ivmmt46';		// PERSONAL BUSINESS
+ivmmb5 = ivmmt51'~ivmmt52'~ivmmt53'~ivmmt54'~ivmmt55';		// SHOP
+ivmmb6 = ivmmt61'~ivmmt62'~ivmmt63'~ivmmt64'~ivmmt65';		// MEAL
+ivmmb7 = ivmmt71'~ivmmt72'~ivmmt73'~ivmmt74'~ivmmt75';		// SOCIAL RECREATION
+
+ivmmb = ivmmb1~ivmmb2~ivmmb3~ivmmb4~ivmmb5~ivmmb6~ivmmb7;  //print "ivmb: " ivmb;
+/************END OF BOTTOM NEST DEFINITION FOR TOP NEST*************/
+
+ivdb1 = ivdt11'~ivdt12'~ivdt13'~ivdt14'~ivdt15'~ivdt16'~ivdt17'~ivdt18'~ivdt19';  	// WORK TOUR
+ivdb2 = ivdt21'~ivdt22'~ivdt23'~ivdt24'~ivdt25'~ivdt26'~ivdt27'~ivdt28';  			// SCHOOL TOUR
+ivdb3 = ivdt31'~ivdt32'~ivdt33'~ivdt34'~ivdt35'~ivdt36'~ivdt37';  					// ESCORT
+ivdb4 = ivdt41'~ivdt42'~ivdt43'~ivdt44'~ivdt45'~ivdt46';  							// PERSONAL BUSINESS
+ivdb5 = ivdt51'~ivdt52'~ivdt53'~ivdt54'~ivdt55';  									// SHOP
+ivdb6 = ivdt61'~ivdt62'~ivdt63'~ivdt64'~ivdt65';  									// MEAL
+ivdb7 = ivdt71'~ivdt72'~ivdt73'~ivdt74'~ivdt75';  									// SOCIAL RECREATION
+
+ivdb = ivdb1~ivdb2~ivdb3~ivdb4~ivdb5~ivdb6~ivdb7;  //print "ivdb: " ivdb;
+
+ivgb1 = ivgt11'~ivgt12'~ivgt13'~ivgt14'~ivgt15'~ivgt16'~ivgt17'~ivgt18'~ivgt19';    // WORK
+ivgb2 = ivgt21'~ivgt22'~ivgt23'~ivgt24'~ivgt25'~ivgt26'~ivgt27'~ivgt28';			// SCHOOL
+ivgb3 = ivgt31'~ivgt32'~ivgt33'~ivgt34'~ivgt35'~ivgt36'~ivgt37';					// ESCORT
+ivgb4 = ivgt41'~ivgt42'~ivgt43'~ivgt44'~ivgt45'~ivgt46';							// PERSONAL BUSINESS
+ivgb5 = ivgt51'~ivgt52'~ivgt53'~ivgt54'~ivgt55';									// SHOP
+ivgb6 = ivgt61'~ivgt62'~ivgt63'~ivgt64'~ivgt65';									// MEAL
+ivgb7 = ivgt71'~ivgt72'~ivgt73'~ivgt74'~ivgt75';									// SOCIAL RECREATION
+
+ivgb = ivgb1~ivgb2~ivgb3~ivgb4~ivgb5~ivgb6~ivgb7;  //print "ivgb: " ivgb;
+
+/**********************END OF DEFINITION ***********************************/
+
+nvarmt = cols(ivm1);     // number of variables in baseline utility   = number of columns in ivm1, do not modify this
+nvardelt = cols(ivd1);   // number of variables in satiation          = number of columns in ivd1, do not modify this
+nvargamt = cols(ivg1);   // number of variables in translation        = number of columns in ivg1, do not modify this
+
+/********Definition for the bottom nests***********************/
+nvarmb = cols(ivm11)|cols(ivm21)|cols(ivm31)|cols(ivm41)|cols(ivm51)|cols(ivm61)|cols(ivm71); 	// Number of all baseline parameters in the bottom nests
+nvardelb = cols(ivd11)|cols(ivd21)|cols(ivd31)|cols(ivd41)|cols(ivd51)|cols(ivd61)|cols(ivd71); // Number of all alpha parameters in the bottom nests
+nvargamb = cols(ivg11)|cols(ivg21)|cols(ivg31)|cols(ivg41)|cols(ivg51)|cols(ivg61)|cols(ivg71); // Number of all gamma parameters in the bottom nests
+
+nvarmmb = cols(ivmm11)|cols(ivmm21)|cols(ivmm31)|cols(ivmm41)|cols(ivmm51)|cols(ivmm61)|cols(ivmm71); 	// Number of all baseline parameters in the bottom nests
+
+/******END OF DEFINITION OF NUMBER OF PARAMETERS IN THE BOTTOM NEST ********************/
+
+/*******CREATE CONSBOT THAT WILL HOLD THE NUMBER OF CONSTANTS IN EACH OF THE BOTTOM NESTS**************/
+consBot = {};  //consBot will hold the number of constants in the bottom nests
+for i ((numout_top+1),nc_top,1);
+	consBot = consBot|(nc_bot[i]-1); // Each element holds the number of constants in the respective bottom nest
+endfor;
+
+// Associating columns with variable names
+flagchmFull = f'; //print "flagchm: " flagchm; //flagchm constains pointer to column number for both top nest and bottom nests
+
+/**********************************END OF DEFINITION**************************************************/
+
+// Define parameters to be passed to the main function
+b_top = { -6.2427	-13.8414	-9.615	-9.7656	-9.4895	-9.2632	-8.8137 //Cons
+			-0.5178//gender
+			0.3279	3.3185	-0.6654	0.2945	0.2308	0.2096	1.8194	0.4009	-0.4444	-0.153	-0.3537	-0.3362 //age 
+			-0.3052	-0.3296	0.1748	-0.4807 //income
+			-0.993	2.2335	0.4337	0.3563	0.3606 // part time worker
+			0.2138	0.2153  // urban dummy //beta parameters
+			0.3219	0.4833	0.3542 // Friday
+			0.9327 // driver dummy
+			0.568	0.3149 // Ratio 3 dummy
+		};
+		
+b_top = b_top';
+
+@Work Tour@
+b_bot1 = { //-3.1054	-8.2913	-8.654	-7.9086	-7.8288	-7.8035	-7.9877	-8.254 //Cons
+			0.5025	-0.5513	-0.8761	-0.4731	-0.5386 //gender
+			-0.9402	0.8205 // urban dummy 
+			0.3538	0.6056	0.9328	0.4933	0.6511	0.6944 //Flexible start time dummy
+			0.6142	0.5882 };  // Friday dummy 
+
+b_bot1 = b_bot1';
+
+@School Tour@
+b_bot2 = { //-2.6972	-7.7911	-7.6615	-7.4827	-7.7773	-7.3801	-7.5616 //Cons
+			0.6406	1.9441 //gender
+			};  // Friday dummy 
+
+b_bot2 = b_bot2';
+
+@Escort Tour@
+b_bot3 = { //-0.7022	-4.8714	-5.1938	-4.2542	-4.5279	-4.8 //Cons
+			-0.6171 //gender
+			0.0148	0.0238 // Residential density and employment density dummy
+			-0.888 };  // Friday dummy 
+
+b_bot3 = b_bot3';
+
+@Personal Business Tour@
+b_bot4 = { //-1.3788	-5.479	-5.5629	-5.7019	-6.1382  //Constant
+			-1.8076	0.9293	-1.1503	-1.0799	0.1861 // Age dummy
+			0.0065	0.0375	0.0124 };  // Population and employment  dummy 
+
+b_bot4 = b_bot4';
+
+@Shop Tour@
+b_bot5 = { //-1.4498	-5.1403	-7.1297	-6.2167 ///Constant
+			0.4607	-0.5827 // Male dummy
+			0.0164 // Employment density
+			0.8287 // Friday
+			0.3929  // Age
+		};  
+
+b_bot5 = b_bot5';
+
+@Meal Tour@
+b_bot6 = { //-1.7273	-6.0962	-7.2697	-6.8748 //Constant
+			-0.5422 // Male dummy
+			1.094 // Friday
+			1.2517	0.9487	0.4909  // Age
+			0.8985	1.3342	0.2445  // Income
+		};    
+
+b_bot6 = b_bot6';
+
+@Social Recreation Tour@
+b_bot7 = { //-1.5181	-6.2893	-6.5324	-6.6599 //Constant
+			0.3851 // Friday dummy
+			0.4752	// Age dummy
+		};     
+
+b_bot7 = b_bot7';
+
+@These are the bottom nest parameters without the constants@
+b_bot = b_bot1|b_bot2|b_bot3|b_bot4|b_bot5|b_bot6|b_bot7;
+
+@THESE ARE THE BOTTOM NEST CONSTANTS@
+b_bot_const = { -3.1049	-9.6698	-11.8555	-10.1642	-10.6392	-10.2441	-10.6851	-10.5636//Cons 1st bottom nest
+				-2.6713	-7.6623	-8.03	-8.5185	-10.5763	-6.7439	-7.3769		//Cons 2nd bottom nest
+				-0.697	-4.9451	-5.2472	-4.3841	-4.7359	-4.704			//Cons 3rd bottom nest
+				-1.3782	-5.8556	-5.325	-5.5226	-6.0663  //Constant 4th bottom nest
+				-1.4518	-5.0928	-6.4885	-5.9898 ///Constant 5th bottom nest
+				-1.7305	-7.1914	-8.219	-5.8174 //Constant 6th bottom nest
+				-1.5182	-6.3943	-6.2041	-6.6855 //Constant 7th bottom nest
+			};
+			
+b_bot_const = b_bot_const';			
+
+@END OF BETA SPECIFICATION@
+
+gam_top = { 5.8881	6.1343	4.3219	4.4141	4.0709	5.0322	4.3894 // Constant
+			-0.5176	-0.3369	-0.3862  // Male
+			-0.279	-0.2184	-0.3577  // Age 
+};
+
+gam_top = -1000*ones(numout_top,1)|gam_top';  @Gamma for the outside good in the top nest needs to be fixed@
+
+@Work Tour@
+gam_bot1 = { 5.4004	3.5574	2.4829	3.3458	2.9518	3.6269	4.6182  // Constants
+			0.2145  // Gender
+			-0.3117	-0.252 // Age
+			-0.6281	-0.7581	1.9154	2.1117 // Income
+ };  //Again the serial is gamam in the 1st bottom, then 2nd bottom, then so on
+
+gam_bot1 = gam_bot1';
+
+@School Tour@
+gam_bot2 = { 6.2334	3.4532	3.5538	3.3242	5.6092	5.5718 };
+
+gam_bot2 = gam_bot2';
+
+@Escort Tour@
+gam_bot3 = { 2.7307	5.8745	4.2805	4.8536	8.6226 };
+
+gam_bot3 = gam_bot3';
+
+@Personal Business Tour@
+gam_bot4 = { 3.5426	4.6748	5.1918	6.6688 };
+
+gam_bot4 = gam_bot4';
+
+@Shop Tour@
+gam_bot5 = { 4.2556	5.2987	5.3852 };
+
+gam_bot5 = gam_bot5';
+
+@Meal Tour@
+gam_bot6 = { 4.6445	3.8873	9.741 };
+
+gam_bot6 = gam_bot6';
+
+@Social Recreation Tour@
+gam_bot7 = { 4.484	5.3199	5.2855 // Constants
+			-1.3521  // Gender
+			0.898	0.9775  // Income
+ };
+
+gam_bot7 = gam_bot7';
+
+@Every bottom level model has 2 outside goods, for those goods the gamma is fixed to zero@
+gam_bot = -1000*ones(numout_bot,1)|gam_bot1|-1000*ones(numout_bot,1)|gam_bot2|
+			-1000*ones(numout_bot,1)|gam_bot3|-1000*ones(numout_bot,1)|gam_bot4|
+			-1000*ones(numout_bot,1)|gam_bot5|-1000*ones(numout_bot,1)|gam_bot6|-1000*ones(numout_bot,1)|gam_bot7;
+
+@END OF GAMMAA SPECIFICATION@
+//lambda_top = eye(nc_top); 
+
+@Non-iid errors actual parameters provided@
+lambda_top = { 1	
+			   0	1	
+			   0	-0.3933	1.5784	
+			   0	-0.4569	0		1.5643	
+			   0	-0.9301	-0.6163	0		1.4468	
+			   0	-0.7666	0		0		0		1.7795	
+			   0	-0.5704	0		-0.3946	-0.4202	0		0.8312	
+			   0	-0.4929	0		0		0		0		-0.9196	1.2354 };
+lambda_top = lambda_top';			   
+
+
+@DEFINE THE ALPHA PARAMETERS@
+//alpha_top = ones((nc_top-numout_top-1),1)|0;  @Starting values should not be zeros@
+alpha_top = 0.0548|0.2531|0.0|0.0|0.0|0.0|0;  @Starting values should not be zeros@
+
+@For the outside good in the top nest, there is no bottom nest@
+@Each nc by nc diagonal carries@
+lambda_bot = eye(sumc(nc_bot));  // For IID error
+
+@For heteroskedastic error@
+
+diag_bot_chol1 = { 1 0.1965  1.8678   2.6992 	2.6663  3.1188  2.9369  2.8643  2.4125 };  	diag_bot_chol1 = diag_bot_chol1'; // work
+diag_bot_chol2 = { 0.4169    0.7935    1	    1.3493  1.8147  2.6767  0.603 1 };  		diag_bot_chol2 = diag_bot_chol2'; // school
+diag_bot_chol3 = { 0.5782    0.5689    1.2045   1.0234  1.3122  1.3509  1 };  			diag_bot_chol3 = diag_bot_chol3'; // escort
+diag_bot_chol4 = { 0.8758    0.6585    1.4792   0.8254  0.9189  1  };  					diag_bot_chol4 = diag_bot_chol4'; // personal business
+diag_bot_chol5 = { 0.4216    0.6277   0.9667    0.7617  1	 };  							diag_bot_chol5 = diag_bot_chol5'; // shop
+diag_bot_chol6 = { -0.3787   1        1.3086    1.0593  0.0014 };  								diag_bot_chol6 = diag_bot_chol6'; // meal
+diag_bot_chol7 = { 0.6891    1.0831   1.063    0.7498   1 };  								diag_bot_chol7 = diag_bot_chol7'; // social recreation
+				 
+
+diag_bot_chol = diag_bot_chol1|diag_bot_chol2|diag_bot_chol3|diag_bot_chol4|diag_bot_chol5|diag_bot_chol6|diag_bot_chol7;				   // This is the diagonal of the cholesky matrix
+
+lambda_bot_chol = { };
+
+for i((numout_top+1),nc_top,1);  // Since the outside good in the top nest does not have any bottom nests
+	if (i.==(numout_top+1));
+		lambda_bot_chol = lambda_bot_chol|vech(diagrv(eye(nc_bot[i]),diag_bot_chol[1:nc_bot[i]]));
+	else;
+		start = (sumc(nc_bot[1:i-1])+1);
+		end_ = (sumc(nc_bot[1:i]));
+		lambda_bot_chol = lambda_bot_chol|vech(diagrv(eye(nc_bot[i]),diag_bot_chol[start:end_]));
+	endif;
+endfor;
+
+@End of setting lambda_bot_chol for heetroskedastic error@
+
+/*************Now arracnge the beta parameters**********************/
+//bb = b_top|gam_top|vech(chol(lambda_top)'); //End of top nest parameter, not passing alpha, since it is fixed in gamma spec
+//bb = b_top|gam_top|lambda_top; //Appending lambda top which is already the vector of choleskies
+
+//bb = bb|alpha_top;  // ADDING THE ALPHA_TOP PARAMETERS
+
+@This lambda_bot_chol is for iid error@
+/*lambda_bot_chol = {};
+for i((numout_top+1),nc_top,1);  // Since the outside good in the top nest does not have any bottom nests
+	if (i.==(numout_top+1));
+		lambda_bot_chol = lambda_bot_chol|vech(chol(lambda_bot[1:nc_bot[i],1:nc_bot[i]])');
+	else;
+		lambda_bot_chol = lambda_bot_chol|vech(chol(lambda_bot[(sumc(nc_bot[1:(i-1)])+1):sumc(nc_bot[1:i]),(sumc(nc_bot[1:i-1])+1):sumc(nc_bot[1:i])])');
+	endif;
+endfor; //End of creation of lambda_bot_chol which is a column vector
+*/
+
+//bb = bb|b_bot;  @This specification is only for running the top nest model@
+
+//bb = bb|b_bot|b_bot_const|gam_bot|lambda_bot_chol; //End of appending the paremeters for the bottom nest
+
+
+@THIS IS THE ACTUAL BETA@
+bb = { -6.7186	-12.4318	-10.5227	-9.0538	-9.4221	-9.5127	-9.2578	0.3671	-0.3713	0.2487	2.7621	-0.6573	0.0876	0.2058	1.1152	0.768	-0.4491	-0.2636	0.0887	0.2857	0.2532	-0.1968	-0.3481	0.3314	0.4367	-0.4184	0.4042	0.387	0.1922	0.2146	0.1613	-0.3268	0.3587	0.4533	0.1416	-1.0745	1.8175	0.4935	0.4311	0.1884	0.3519	-0.3085	-1000	5.7634	6.5426	4.1845	4.6644	4.4254	4.9123	4.6125	0.1588	-0.0944	-0.1806	-0.2064	-0.2126	-0.699	-0.1606	-0.5651	-0.1278	0.4557	-0.1395	0.3293	0.2511	-0.1125	-0.239	-0.3772	-0.2989	0.3181	0.0989	0.338	0.3373	0.2403	0.271	0.2782	1	0	1	0	-0.3619	1.4697	0	-0.5838	0	1.9293	0	-0.8935	-0.4151	0	1.4958	0	-0.7509	0	0	0	1.6897	0	-0.5616	0	-0.3554	-0.4218	0	1.0065	0	-0.4628	0	0	0	0	-0.6567	1.3536	0.044	0	0	0	0	0	0	-0.4353	-0.8971	-0.9129	-0.4946	-0.1767	-0.2032	2.1107	1.5781	-1.2775	-0.7433	-0.3051	-0.1494	2.1391	-0.854	-0.4135	-0.2153	-0.4871	0.7724	0.1436	1.3935	0.1918	0.2056	0.3767	1.3321	0.5438	0.3475	0.2954	0.5189	0.8102	0.2454	0.5593	0.3862	0.8037	0.4743	-0.741	0.3982	0.6623	4.9324	2.1271	1.7753	1.4175	-0.1458	-0.3223	-0.2167	-0.216	0.3553	-0.8505	-0.7327	-1.1866	1.0995	0.596	1.0045	0.6318	-0.8488	-0.6698	-0.511	-0.4534	-0.3222	0.7049	0.3398	-0.5178	1.0153	-0.6505	0.943	-0.9253	-1.0712	-0.7723	0.4164	0.4818	-0.6532	0.6813	0.3503	-0.6061	0.7389	0.8633	0.4217	0.2427	-0.3959	-0.4032	-0.2421	-0.3809	-0.9686	0.53	-0.3422	-0.2388	-0.4476	-0.5932	-0.5936	0.4502	0.557	0.2819	0.3854	0.3388	0.3659	-1.3037	-0.2945	-0.5022	-0.3899	-1.4945	0.2543	-0.462	0.4578	0.2081	0.3463	0.4937	0.42	0.8324	-1.2603	-0.8878	-0.6018	-0.7866	0.6466	0.643	0.6901	-0.1603	0.3556	0.6471	0.8892	-3.0551	-14.0683	-12.8167	-11.945	-9.7486	-11.7894	-12.731	-12.6426	-2.6937	-8.3749	-7.4407	-7.5776	-5.5374	-7.385	-7.8307	-0.7833	-4.5475	-6.3224	-3.77	-3.7223	-5.7509	-1.3413	-5.9913	-5.3212	-5.9741	-5.5283	-1.4542	-5.8497	-6.106	-5.3849	-1.761	-6.8721	-7.8716	-7.1086	-1.5039	-6.7741	-6.8918	-6.7018	-1000	-1000	5.5174	5.5833	2.612	3.4598	2.9201	3.2838	4.5322	1.2236	-0.3226	-0.4551	-0.3747	-2.0629	0.3764	0.1679	-1000	-1000	4.5308	3.8831	4.3257	4.465	4.5614	5.0387	1.474	-0.8914	1.3503	-1000	-1000	3.0002	6.2999	4.4034	4.643	7.5709	0.626	0.7731	-1000	-1000	3.5151	4.3093	5.0927	7.8147	-0.4074	0.3603	-0.86	-0.994	0.7176	-1000	-1000	4.643	5.496	5.4689	-1000	-1000	3.9278	4.1434	6.8976	-1000	-1000	4.2275	5.5944	5.4508	-0.4844	-0.752	0.6889	0.3764	0.7587	-0.6877	1	0	0.3014	0	0	1.7939	0	0	0	1.8711	0	0	0	0	2.7985	0	0	0	0	0	3.0024	0	0	0	0	0	0	2.9773	0	0	0	0	0	0	0	2.9583	0	0	0	0	0	0	0	0	2.6902	1	0	1	0	0	1	0	0	0	1	0	0	0	0	1	0	0	0	0	0	1	0	0	0	0	0	0	1	0	0	0	0	0	0	0	1	0.7422	0	0.6258	0	0	0.9293	0	0	0	0.929	0	0	0	0	0.9861	0	0	0	0	0	1.0764	0	0	0	0	0	0	1	0.8763	0	0.6638	0	0	1.5765	0	0	0	1.1766	0	0	0	0	1.2276	0	0	0	0	0	1	-0.4558	0	0.5971	0	0	0.8252	0	0	0	0.8193	0	0	0	0	1	1	0	-0.0002	0	0	1.6254	0	0	0	1.9269	0	0	0	0	0.9049	0.7305	0	1.0637	0	0	0.9835	0	0	0	0.6481	0	0	0	0	1
+	 };
+bb = bb';	 
+
+seednext = 983654;
+
+print "rows(bb): " rows(bb);
+
+/**************END OF VARIABLE SPECIFICATION***********************************************/
+/******************************************************************************************/
+
+
+@For all the individual top level total budget is equal to 1440 minutes@
+//print "Top level total budget: " sumc(sumc(dataMat[.,f[1:nc_top]]') .== 1440);
+
+@Observed participation and consmuption for top nest@
+
+obsPart = (sumc(dataMat[.,f[1:nc_top]] .!= 0) ./ rows(dataMat))*100;
+obsCons1 = sumc((dataMat[.,f[1:nc_top]] .!= 0) .* dataMat[.,f[1:nc_top]]) ./ (sumc(dataMat[.,f[1:nc_top]] .!= 0));
+obsCons2 = sumc(dataMat[.,f[1:nc_top]]) ./ rows(dataMat);
+
+/*print "participation: " round(obsPart');
+print "consumption 1: " round(obsCons1');
+print "consumption 2: " round(obsCons2');
+*/
+
+
+/*****************************************************************************************************/
+/*****************************************************************************************************/
+
+@Observed participation for bottom nests@
+count = nc_top;
+//print f[nc_top+1:rows(f)]';
+for i((numout_top+1),nc_top,1);
+	//print "Number of bottom nest alternatives: " i nc_bot[i];
+	//print i f[count+1:count+nc_bot[i]]';
+	
+	//print "Test: " sumc(dataMat[.,f[i]] .== sumc(dataMat[.,f[count+1:count+nc_bot[i]]]'));
+	
+	// Selecting the people who have participated in the tour
+	dataMat_sub = selif(dataMat,dataMat[.,f[i]] .> 0);  // print i  rows(dataMat_sub);
+	
+	obsPart = (sumc(dataMat_sub[.,f[count+1:count+nc_bot[i]]] .!= 0) ./ rows(dataMat_sub))*100;
+	obsCons1 = sumc((dataMat_sub[.,f[count+1:count+nc_bot[i]]] .!= 0) .* dataMat_sub[.,f[count+1:count+nc_bot[i]]]) ./ (sumc(dataMat_sub[.,f[count+1:count+nc_bot[i]]] .!= 0));
+	obsCons2 = sumc(dataMat_sub[.,f[count+1:count+nc_bot[i]]]) ./ rows(dataMat_sub);
+	
+	/*print "participation: " round(obsPart');
+	print "consumption 1: " round(obsCons1');
+	print "consumption 2: " round(obsCons2');
+	*/
+	
+	count = count+nc_bot[i];  // There are 6 in work, 1 in escort, 2 in personal business, i in shop, and 1 in meal; where the difference is not zero
+endfor;
+
+
+/**********************************************************************************/
+/**********************************************************************************/
+
+@CHECK OUT THE URBAN DUMMY@
+@Existing data indicates 87% urbanization@
+/*{ urbDumP,urbOrg } = indices(dataset,"urbDum");  // This data did not have any missing values
+
+print "Number of people living in the urban area: " sumc(dataMat[.,urbOrg]);  // 4577
+print "Number of people not living in the urban area: " sumc(dataMat[.,urbOrg].==0);  // 656
+*/
+
+
+/*@@@@@@@@@@@@@@@@@@@@@@@@@@@@FUNCTION CALLING AREA@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@*/
+
+ // This will hold the average consumption for each person across nrep error draws
+// This is the call for the top nest, this will return a value
+// The call for the bottom nest calculation will not return anything...
+forecasts_top =  mainFun(bb,dataMat); // This will hold the full forecast sorted as 1 to nobs for 1st rep, then 1 to nobs for 2nd rep and so on... 
+
+print "rows and columns of forecasts_top: " rows(forecasts_top)  cols(forecasts_top);
+
+print "meanc(forecasts_top): " meanc(forecasts_top)';  // This mean matches with the mean where consmuption mean is taken across all the different individual
+
+// This is the call to the function, for bottom nest consmuption calculation
+call mainFun2(bb,dataMat);
+
+
+
+ /***********HERE CREATE A FUNCTION THAT WILL CALL THE lprnorm(x,dta) (L+1) TIMES**************************
+  DEPENDING ON THE PARAMETERS THAT IS NEEDED TO RUN THE MODEL***************************
+  *******************WHERE L IS NUMBER OF BOTTOM NESTS AND 1 IS FOR THE TOP NEST MODEL*******************
+  ***************THE PURPOSE OF THE IS FUNCTON IS TO CREATE THE WHOLE LOGLIKELIHOOD FUNCTION*******/
+
+@In this particular code, this is being used for top nest mainly@
+ proc mainFun(x,dta); //x takes the parameters; i.e. bb and dta takes the data matrix with nobs rows
+	 local ll, nc, ivm, ivd, ivg, nvarm, nvardel, nvargam, eqmatdel, eqmatgam, beta, flagchm, numout;
+	 local const_base, beta_base, beta_gam, beta_chol, chol_count;
+	 local dtaNew, x_sel, par_sel;
+	 local forecasts, forecast2, part, consu, partf, consf, dataR, consu2, consf2, dta_sub;
+	 
+	 ll = zeros(rows(dta),1); //This variable will add the log-likelihood returned from lprnorm
+	 //for k(1,(nc_top-numout_top),1); @This loop will run ((nc_top-numout_top)+1) times; each run will call lprnorm with appropriate beta@
+	 for k(0,0,1);	 
+		 if(k.==0); //Indictaes top nest
+			 nc = nc_top;    //print "nc: " nc;//nc_top is defined previously  
+			 ivm = ivmt; ivd = ivdt; ivg = ivgt;  //print "ivm & ivmt: " ivm'~ivmt';  print "ivd & ivdt: " ivd'~ivdt';  print "ivg & ivgt: " ivg'~ivgt';
+			 nvarm = nvarmt; nvardel = nvardelt; nvargam = nvargamt; //print "nvarm: " nvarm "nvardel: " nvardel "nvargam: " nvargam;
+			 //beta = x[1:nvarmt+nvargamt+(nc_top*(nc_top+1)/2)+sumc(nvarmb)]; //print "rows(beta): " rows(beta);//print "beta: " beta';
+			 @Changed to nvarmmb from nvarmb@
+			 beta = x[1:nvarmt+nvargamt+(nc_top*(nc_top+1)/2)+(nc_top-numout_top)+sumc(nvarmmb)]; //print "rows(beta): " rows(beta);//print "beta: " beta';
+			 flagchm = flagchmFull[1:nc_top];  //print "flagchm: " flagchm;
+			 numout = numout_top;  //print "numout: " numout;
+		 elseif (k.== 1);  // We want to skip the k=1 run 			
+			nc = nc_bot[k+numout_top];  //print "nc: " nc;//Number of parameters in each of the bottom nests 
+			ivm = ivmb[1:nvarmb[k]*nc_bot[(k+numout_top)]]; 	//print "ivm: " ivm;
+			ivd = ivdb[1:nvardelb[k]*nc_bot[(k+numout_top)]]; 	//print "ivd: " ivd;
+			ivg = ivgb[1:nvargamb[k]*nc_bot[(k+numout_top)]]; 	//print "ivg: " ivg;
+			nvarm = nvarmb[k];  nvardel = nvardelb[k];  nvargam = nvargamb[k];  	//print "nvarm: " nvarm "nvardel: " nvardel "nvargam: " nvargam;
+			/*beta_base = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+nvarmb[k]]; 	//print "beta_bsae: " beta_base';
+			beta_gam = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+sumc(nvarmb[1:(nc_top-numout_top)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+sumc(nvarmb[1:(nc_top-numout_top)])+nvargamb[k]]; 	//print "beta_gam: " beta_gam';
+			beta_chol = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+sumc(nvarmb[1:(nc_top-numout_top)])+sumc(nvargamb[1:(nc_top-numout_top)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+sumc(nvarmb[1:(nc_top-numout_top)])+sumc(nvargamb[1:(nc_top-numout_top)])+nc_bot[k+numout_top]*(nc_bot[k+numout_top]+1)/2]; 	//print "beta_chol: " beta_chol';
+			beta = beta_base|beta_gam|beta_chol; 	//print "beta: " beta;*/
+			const_base = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb)+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb)+consBot[k]]; 	//print "beta_bsae: " beta_base';
+			beta_base = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+nvarmmb[k]]; 	//print "beta_bsae: " beta_base';
+			beta_gam = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+nvargamb[k]]; 	//print "beta_gam: " beta_gam';
+			beta_chol = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:(nc_top-numout_top)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:(nc_top-numout_top)])+nc_bot[k+numout_top]*(nc_bot[k+numout_top]+1)/2]; 	//print "beta_chol: " beta_chol';
+			//beta = beta_base|beta_gam|beta_chol; 	//print "beta: " beta;
+			beta = const_base|beta_base|beta_gam|beta_chol; 	//print "beta: " beta;
+			flagchm = flagchmFull[nc_top+1:nc_top+nc_bot[k+numout_top]]; 	//print "flagchm: " flagchm;
+			numout = numout_bot;   //print "numout: " numout;
+		 else;
+			nc = nc_bot[k+numout_top];  //print "nc: " nc; //Number of parameters in each of the bottom nests
+			ivm = ivmb[sumc(nvarmb[1:(k-1)].*nc_bot[(numout_top+1):(numout_top+k-1)])+1:sumc(nvarmb[1:k].*nc_bot[(numout_top+1):(k+numout_top)])];  //print "ivm: " ivm;
+			ivd = ivdb[sumc(nvardelb[1:(k-1)].*nc_bot[(numout_top+1):(numout_top+k-1)])+1:sumc(nvardelb[1:k].*nc_bot[(numout_top+1):(k+numout_top)])];  //print "ivd: " ivd;
+			ivg = ivgb[sumc(nvargamb[1:(k-1)].*nc_bot[(numout_top+1):(numout_top+k-1)])+1:sumc(nvargamb[1:k].*nc_bot[(numout_top+1):(k+numout_top)])];	//print "ivg: " ivg;
+			nvarm = nvarmb[k];  nvardel = nvardelb[k];  nvargam = nvargamb[k];		//print "nvarm: " nvarm "nvardel: " nvardel "nvargam: " nvargam;
+			/*beta_base = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+sumc(nvarmb[1:(k-1)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+sumc(nvarmb[1:k])];  //print "beta_base: " beta_base';
+			beta_gam = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+sumc(nvarmb[1:(nc_top-numout_top)])+sumc(nvargamb[1:(k-1)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+sumc(nvarmb[1:(nc_top-numout_top)])+sumc(nvargamb[1:k])];  //print "beta_gam: " beta_gam';
+			chol_count = 0;
+			for m(1,(k-1),1);
+				chol_count = chol_count + nc_bot[(m+numout_top)]*(nc_bot[(m+numout_top)]+1)/2;
+			endfor;
+			beta_chol = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+sumc(nvarmb[1:(nc_top-numout_top)])+sumc(nvargamb[1:(nc_top-numout_top)])+chol_count+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+sumc(nvarmb[1:(nc_top-numout_top)])+sumc(nvargamb[1:(nc_top-numout_top)])+chol_count+nc_bot[(k+numout_top)]*(nc_bot[(k+numout_top)]+1)/2];  //print "beta_chol: " beta_chol;
+			beta = beta_base|beta_gam|beta_chol;  //print "beta: " beta;*/
+			const_base = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb)+sumc(consBot[1:(k-1)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb)+sumc(consBot[1:k])];  //print "const_base: " const_base;
+			beta_base = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(k-1)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:k])];  //print "beta_base: " beta_base';
+			beta_gam = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:(k-1)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:k])];  //print "beta_gam: " beta_gam';
+			chol_count = 0;
+			for m(1,(k-1),1);
+				chol_count = chol_count + nc_bot[(m+numout_top)]*(nc_bot[(m+numout_top)]+1)/2;
+			endfor;
+			beta_chol = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:(nc_top-numout_top)])+chol_count+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:(nc_top-numout_top)])+chol_count+nc_bot[(k+numout_top)]*(nc_bot[(k+numout_top)]+1)/2];  //print "beta_chol: " beta_chol;
+			beta = const_base|beta_base|beta_gam|beta_chol;  //print "beta: " beta;
+			flagchm = flagchmFull[nc_top+sumc(nc_bot[(numout_top+1):(numout_top+k-1)])+1:nc_top+sumc(nc_bot[(1+numout_top):(k+numout_top)])]; //print "flagchm: " flagchm;
+			numout = numout_bot;  //print "numout: " numout;
+		endif;
+		eqmatdel = ones(1,nc);
+		eqmatgam = eye(nvargam);
+		
+		if (k.== 0); // Different functions are getting called depending on the nest
+			local top_cons_forecast;
+		
+			forecasts = forecTop(beta,dta, nc, nvarm, nvardel, nvargam, ivm, ivd, ivg, flagchm, eqmatdel, eqmatgam, numout); // This data is sorted as nrep observations for 1st individual and so on... 
+			forecast2 = sortmc(Forecasts,2|1); @Sorting the forecasts, so that 2093 individuals are repeated for error 1 and so on@
+			
+			top_cons_forecast = forecast2[.,2+1:2+nc];
+			
+			part = zeros(nrep,nc); @To hold the participation % for nrep repetition@
+			consu = zeros(nrep,nc);
+			consu2 = zeros(nrep,nc);
+			
+			for r(1,nrep,1);
+				@Calculate participation percentage and consumption average@
+				dataR = forecast2[(r-1)*nobs+1:r*nobs,2+1:2+nc]; @Taking only the consumption pattern@
+				
+		    	part[r,.] = (sumc(dataR .!= 0)./nobs)' * 100;
+				consu[r,.] = meanc(dataR)';
+				consu2[r,.] = (sumc((dataR .!= 0).*dataR) ./sumc(dataR .!= 0))' ;
+			endfor; @At the end of this loop, both part and cons should be nrep by nc matrix@
+			partf = meanc(part)';
+			consf = meanc(consu)';
+			consf2 = meanc(consu2)';
+			
+			print "FOR TOP NEST.........: ";
+			print "participation: " partf;
+			print "consumption 1: " consf2;
+			print "consumption 2: " consf;
+			
+			clear dataR, part, consu, consu2, partf, consf, consf2;
+		else;
+			/*dta_sub = selif(dta,dta[.,f[numout_top+k]] .> 0);  //print "nc: " nc; //print "rows(dta_sub): " rows(dta_sub);
+			forecasts = forecBottom(beta,dta_sub, nc, nvarm, nvardel, nvargam, ivm, ivd, ivg, flagchm, eqmatdel, eqmatgam, numout); // This data is sorted as nrep observations for 1st individual and so on... 
+			forecast2 = sortmc(Forecasts,2|1); @Sorting the forecasts, so that 2093 individuals are repeated for error 1 and so on@
+			
+			part = zeros(nrep,nc); @To hold the participation % for nrep repetition@
+			consu = zeros(nrep,nc);
+			consu2 = zeros(nrep,nc);
+			
+			for r(1,nrep,1);
+				@Calculate participation percentage and consumption average@
+				dataR = forecast2[(r-1)*rows(dta_sub)+1:r*rows(dta_sub),2+1:2+nc]; @Taking only the consumption pattern@
+					
+		    	part[r,.] = (sumc(dataR .!= 0)./rows(dta_sub))' * 100;
+				consu[r,.] = meanc(dataR)';
+				consu2[r,.] = (sumc((dataR .!= 0).*dataR) ./sumc(dataR .!= 0))' ;
+			endfor; @At the end of this loop, both part and cons should be nrep by nc matrix@
+			partf = meanc(part)';
+			consf = meanc(consu)';
+			consf2 = meanc(consu2)';
+			
+			print "FOR TOP NEST...................";
+			print "participation: " partf;
+			print "consumption 1: " consf2;
+			print "consumption 2: " consf;
+			*/
+		endif;
+	
+		if (k.==0);
+			retp(top_cons_forecast[.,numout_top+1:nc_top]);
+		else;
+			retp(0);
+		endif;
+		
+	endfor;
+	
+endp;
+
+/* In this implementation this is being used for bottom nest mainly********************/
+proc mainFun2(x,dta); //x takes the parameters; i.e. bb and dta takes the data matrix with nobs rows
+	 local ll, nc, ivm, ivd, ivg, nvarm, nvardel, nvargam, eqmatdel, eqmatgam, beta, flagchm, numout;
+	 local const_base, beta_base, beta_gam, beta_chol, chol_count;
+	 local dtaNew, x_sel, par_sel;
+	 local forecasts, forecast2, part, consu, partf, consf, dataR, consu2, consf2, dta_sub;
+	 local budget, forecasts_top_iter;
+	 
+	 ll = zeros(rows(dta),1); //This variable will add the log-likelihood returned from lprnorm
+	 for k(1,(nc_top-numout_top),1); @This loop will run ((nc_top-numout_top)+1) times; each run will call lprnorm with appropriate beta@
+	 //for k(2,2,1);  // To check the school sub-tour only
+	 //for k(0,0,1);	 
+		 if(k.==0); //Indictaes top nest
+			 nc = nc_top;    //print "nc: " nc;//nc_top is defined previously  
+			 ivm = ivmt; ivd = ivdt; ivg = ivgt;  //print "ivm & ivmt: " ivm'~ivmt';  print "ivd & ivdt: " ivd'~ivdt';  print "ivg & ivgt: " ivg'~ivgt';
+			 nvarm = nvarmt; nvardel = nvardelt; nvargam = nvargamt; //print "nvarm: " nvarm "nvardel: " nvardel "nvargam: " nvargam;
+			 //beta = x[1:nvarmt+nvargamt+(nc_top*(nc_top+1)/2)+sumc(nvarmb)]; //print "rows(beta): " rows(beta);//print "beta: " beta';
+			 @Changed to nvarmmb from nvarmb@
+			 beta = x[1:nvarmt+nvargamt+(nc_top*(nc_top+1)/2)+(nc_top-numout_top)+sumc(nvarmmb)]; //print "rows(beta): " rows(beta);//print "beta: " beta';
+			 flagchm = flagchmFull[1:nc_top];  //print "flagchm: " flagchm;
+			 numout = numout_top;  //print "numout: " numout;
+		 elseif (k.== 1);  // We want to skip the k=1 run 			
+			nc = nc_bot[k+numout_top];  //print "nc: " nc;//Number of parameters in each of the bottom nests 
+			ivm = ivmb[1:nvarmb[k]*nc_bot[(k+numout_top)]]; 	//print "ivm: " ivm;
+			ivd = ivdb[1:nvardelb[k]*nc_bot[(k+numout_top)]]; 	//print "ivd: " ivd;
+			ivg = ivgb[1:nvargamb[k]*nc_bot[(k+numout_top)]]; 	//print "ivg: " ivg;
+			nvarm = nvarmb[k];  nvardel = nvardelb[k];  nvargam = nvargamb[k];  	//print "nvarm: " nvarm "nvardel: " nvardel "nvargam: " nvargam;
+			
+			const_base = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb)+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb)+consBot[k]]; 	//print "beta_bsae: " beta_base';
+			beta_base = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+nvarmmb[k]]; 	//print "beta_bsae: " beta_base';
+			beta_gam = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+nvargamb[k]]; 	//print "beta_gam: " beta_gam';
+			beta_chol = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:(nc_top-numout_top)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:(nc_top-numout_top)])+nc_bot[k+numout_top]*(nc_bot[k+numout_top]+1)/2]; 	//print "beta_chol: " beta_chol';
+			//beta = beta_base|beta_gam|beta_chol; 	//print "beta: " beta;
+			beta = const_base|beta_base|beta_gam|beta_chol; 	//print "beta: " beta;
+			flagchm = flagchmFull[nc_top+1:nc_top+nc_bot[k+numout_top]]; 	//print "flagchm: " flagchm;
+			numout = numout_bot;   //print "numout: " numout;
+		 else;
+			nc = nc_bot[k+numout_top];  //print "nc: " nc; //Number of parameters in each of the bottom nests
+			ivm = ivmb[sumc(nvarmb[1:(k-1)].*nc_bot[(numout_top+1):(numout_top+k-1)])+1:sumc(nvarmb[1:k].*nc_bot[(numout_top+1):(k+numout_top)])];  //print "ivm: " ivm;
+			ivd = ivdb[sumc(nvardelb[1:(k-1)].*nc_bot[(numout_top+1):(numout_top+k-1)])+1:sumc(nvardelb[1:k].*nc_bot[(numout_top+1):(k+numout_top)])];  //print "ivd: " ivd;
+			ivg = ivgb[sumc(nvargamb[1:(k-1)].*nc_bot[(numout_top+1):(numout_top+k-1)])+1:sumc(nvargamb[1:k].*nc_bot[(numout_top+1):(k+numout_top)])];	//print "ivg: " ivg;
+			nvarm = nvarmb[k];  nvardel = nvardelb[k];  nvargam = nvargamb[k];		//print "nvarm: " nvarm "nvardel: " nvardel "nvargam: " nvargam;
+			
+			const_base = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb)+sumc(consBot[1:(k-1)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb)+sumc(consBot[1:k])];  //print "const_base: " const_base;
+			beta_base = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(k-1)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:k])];  //print "beta_base: " beta_base';
+			beta_gam = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:(k-1)])+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:k])];  //print "beta_gam: " beta_gam';
+			chol_count = 0;
+			for m(1,(k-1),1);
+				chol_count = chol_count + nc_bot[(m+numout_top)]*(nc_bot[(m+numout_top)]+1)/2;
+			endfor;
+			beta_chol = x[nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:(nc_top-numout_top)])+chol_count+1:nvarmt+nvargamt+nc_top*(nc_top+1)/2+(nc_top-numout_top)+sumc(nvarmmb[1:(nc_top-numout_top)])+sumc(consBot)+sumc(nvargamb[1:(nc_top-numout_top)])+chol_count+nc_bot[(k+numout_top)]*(nc_bot[(k+numout_top)]+1)/2];  //print "beta_chol: " beta_chol;
+			beta = const_base|beta_base|beta_gam|beta_chol;  //print "beta: " beta;
+			flagchm = flagchmFull[nc_top+sumc(nc_bot[(numout_top+1):(numout_top+k-1)])+1:nc_top+sumc(nc_bot[(1+numout_top):(k+numout_top)])]; //print "flagchm: " flagchm;
+			numout = numout_bot;  //print "numout: " numout;
+		endif;
+		eqmatdel = ones(1,nc);
+		eqmatgam = eye(nvargam);
+		
+		if (k.== 0); // Different functions are getting called depending on the nest
+			print "This should never be reached: ";
+		else;
+			partf = zeros(nrep,nc);
+			consf = zeros(nrep,nc);	
+			consf2 = zeros(nrep,nc);	
+		
+		for iter(1,nrep,1);  // This is across the error of the top nest
+				// forecasts_top_iter is compatible with dta now
+				forecasts_top_iter = forecasts_top[(iter-1)*rows(dta)+1:iter*rows(dta),k];  // kth column contains the appropriate top nest budget
+				
+				dta_sub = selif(dta,forecasts_top_iter .> 0);  				//print "rows(dta_sub): " rows(dta_sub);
+				budget = selif(forecasts_top_iter,forecasts_top_iter .> 0); //print "rows(budget): " iter rows(budget);
+				
+				forecasts = forecBottom(beta,dta_sub, nc, nvarm, nvardel, nvargam, ivm, ivd, ivg, flagchm, eqmatdel, eqmatgam, numout, budget); // This data is sorted as nrep observations for 1st individual and so on... 
+				forecast2 = sortmc(Forecasts,2|1); @Sorting the forecasts, so that 2093 individuals are repeated for error 1 and so on@
+			
+				part = zeros(nrep,nc); @To hold the participation % for nrep repetition@
+				consu = zeros(nrep,nc);
+				consu2 = zeros(nrep,nc);
+				
+				for r(1,nrep,1);  // This is across the errors of the bottom nest
+					@Calculate participation percentage and consumption average@
+					dataR = forecast2[(r-1)*rows(dta_sub)+1:r*rows(dta_sub),2+1:2+nc]; @Taking only the consumption pattern@
+				
+					part[r,.] = (sumc(dataR .!= 0)./rows(dta_sub))' * 100;
+					consu[r,.] = meanc(dataR)';
+					if (k .== 2);
+						consu2[r,.] = (sumc((dataR .!= 0).*dataR) ./(sumc(dataR .!= 0)+1e-5.*ones(nc,1)))' ;  // Just so that the denominator does not become zero
+					else;
+						consu2[r,.] = (sumc((dataR .!= 0).*dataR) ./sumc(dataR .!= 0))' ;
+					endif;
+				endfor; @At the end of this loop, both part and cons should be nrep by nc matrix@
+				
+				partf[iter,.] = meanc(part)';
+				consf[iter,.] = meanc(consu)';
+				consf2[iter,.] = meanc(consu2)';
+		
+			endfor;	// End of loop across the error of the top nest
+			
+			print "FOR BOTTOM NEST...................";
+			print "participation: " (meanc(partf)');
+			print "consumption 1: " (meanc(consf2)');
+			print "consumption 2: " (meanc(consf)');
+			
+			
+		endif;
+
+	endfor;
+
+retp(0);
+
+endp;
+
+			 
+
+/******************************************************************************
+                          Procedure definitions begin: MDCMP
+******************************************************************************/
+proc forecBottom(x,dta,nc, nvarm, nvardel, nvargam, ivm, ivd, ivg, flagchm, eqmatdel, eqmatgam,numout, budget );
+ local e1,popass,p0,xdel,xgam,v2,w2,u2,j,v,w,u,a,b,m,c,xsig,ylarge1,ylarge2,fin,ass,r,ylarge,vv,vlos,ut,p1,p2,p3,z,w1,z1,D;
+ local xthet,ddd,gr,ppp2,pp,ppl,k,v2s,pplnsum,xtheta,xsigm,xsigmm,N,m1,p211,p212,p213,p22,f1, cholesky; //uts;
+ local verr, fin1, as, prices, vqr,alts, fc, lambda, nreps, D_nc, N_nc, cons_final, as2, as_final, as1;
+ local xbeta, N_out, D_out;
+ local nobs;
+ 
+ //print "rows (dta) and rows(budget): " rows(dta) rows(budget);
+ 
+ e1 = rows(dta);  nobs = e1;  //print "nobs: " nobs; //e1 contains the number of observations
+ //wt = dta[.,wtind]; //Get the weight in a column
+ xbeta = x[1:nvarm]; //print "xbase: " xbase;//Baseline utility parameters 
+ xdel  = eqmatdel'*(-1000); //print "xdel: " xdel;//Converts the no. of alpha parameters to be estimated to the total no. of alternatives, nc
+ xgam  = eqmatgam'*x[nvarm+1:nvarm+nvargam]; //print "xgam: " xgam;//same as above
+ cholesky  = upmat(xpnd(x[nvarm+nvargam+1:nvarm+nvargam+(nc*(nc+1)/2)])); //print "xcov: " xcov;//Get the cholesky factors - the upper triangular matrix
+
+//multiply the variables with the appropriate betas for all the alternatives
+ v2 = (ones(nc,1) .*. xbeta)*~(dta[.,ivm])'; 
+ w2 = (ones(nc,1) .*. xdel)*~(dta[.,ivd])';
+ u2 = (ones(nc,1) .*. xgam)*~(dta[.,ivg])'; 
+
+ j=1;
+ v = {};
+ w = {};
+ u = {};
+ alts = (seqa(1,1,nc))'; @A row vector of 1 to 5@
+ do until j == nc+1;
+   v = v~(sumc(v2[(j-1)*nvarm+1:(j*nvarm),.])); //beta_hat*zee
+   w = w~(sumc(w2[(j-1)*nvardel+1:(j*nvardel),.])); //alpha
+   u = u~(sumc(u2[(j-1)*nvargam+1:(j*nvargam),.])); //gamma
+   j = j+1;
+ endo;
+ 
+ clear v2,w2;
+ @v, w and u are nobs by nc matrix@
+ v= exp(v); @This portion is the exp(beta_hat*z_sub_k), this portion will be the same given the values of the beta and z@
+ v = v.*.ones(nrep,1);@nobs*nrep by nc matrix@
+
+ //if (_error==1);
+  /*open fin1 = ^outhalt for read;
+  call seekr(fin1,((popass[1]-1)*nrep+11)); @Ignoring the first 11 halton draws@
+  as = readr(fin1,nrep*e1); @read total nobs*nrep rows from halton draw file@
+  as = as[.,1:nc];
+  as = cdfNi(as); @Converting uniform randoms into standard normals@
+  @ The inverse-normal proc produces very extreme values sometimes. This truncates.@
+  //as=as.*(as .le 10) + 10 .* (as .gt 10);
+  //as=as.*(as .ge -10) -10 .* (as .lt -10);
+  as = (cholesky*as')'; @Converting it to normal with appropriate covariance matrix of cholesky*cholesky'@
+  fin1 = close(fin1);
+  as_final = as;
+ */
+ 
+ as = {};
+ for(1,nrep,1);
+	{as1, seedNew} = rndn(nobs,nc,seedNew);
+	as = as|as1; @Concatenating column wise@
+ endfor;
+ 
+ @Modify the order of the halton draws@
+ as_final = {};
+ for n(1,nc,1);
+	 as2 = as[.,n];
+	 as2 = reshape(as2,nrep,e1)';
+	 as2 = reshape(as2,nrep*e1,1);
+	 as_final = as_final~as2;
+	 clear as2;
+ endfor;	 
+ //as = as_final;		//print "rows(as): " rows(as) "cols(as): " cols(as);
+ @as is nrep*e1 by nc matrix@
+ 
+ 
+ @Multiply by the cholesky matris@
+ as = (cholesky * as_final')';		//print "rows(as): " rows(as) "cols(as): " cols(as);
+ 
+ v = v.*exp(as); //exp(beta_hat*z)*exp(epsilon) = exp(beta_hat*z+epsilon)
+ // Price for each individual is repeated nobs times
+ v = v./(ones(e1,nc).*.ones(nrep,1)); //Price-normalized Baseline Utilities - price is a nbos by nc matrix, making it nobs*nrepxnc matrix
+ a = 1-(1./(1+exp(w))); // Alphas  //nobs by nc		//print "sumc(a): " sumc(a);
+ prices = ones(e1,nc); //flagprcm is a nobs by nc matrix
+ f1 = exp(u);           // Gammas //nobs by nc		//print "f: " f1;
+ 
+ 
+ for i(1,nobs,1); @Looping through the individuals@
+   for r(1,nrep,1); @Looping through the number of repititions@
+     fc = zeros(1,nc); @Place holder for holding generated cunsumptions@
+     vqr = {};
+     vqr = alts|v[((i-1)*nrep+r),.]|prices[i,.]|f1[i,.]; @vqr is a 4 by nc matrix@
+     //print "i: " i "vqr[4]: " vqr[4,.]; 
+	 vqr = vqr[.,1:numout]~(rev(sortr(vqr[.,numout+1:nc],2)')'); @sortr() sorts small to large@ @rev reverses the order of the rows in a matrix@
+     m = numout; @All the outside goods must be consumed@
+     k = -1;
+     
+	 @Calculate lambda - the lagrange multiplier, using the analytical expression 14, only valid is alpha is fixed across alternatives@
+     N_out = sumc((prices[i,1:numout].*((vqr[2,1:numout]).^(1./((1-a[i,1:numout])))))'); //N Calculation for only outside good consumption, if numout>1; sum up for all the outside goods
+     //D_out = sumc((dta[i,flagchm])'); @Sum of the total expenditure is the E, just the sum of the total budget@
+     D_out = budget[i,.];  // This is the budget for the ith person
+	 lambda = (N_out/D_out)^(1-a[i,1]); @lambda is the value of the lagrange multiplier@ @All the a are equal, does not matter which a you use@
+	 N = N_out; D = D_out; //To be used when m < nc
+	 
+     if (vqr[2,numout+1]<lambda);  @Only one good is consumed@ @Lambda is correctly calculated for one good@
+       @lambda is already calculated correctly previously@
+	   fc[1,1:numout] = ((vqr[2,1:numout]./lambda).^(1./((1-a[i,1:numout])))); // Allocation to the outside goods
+       fc[1,numout+1:nc] = zeros(1,nc-numout);
+     else;
+       do until k==m;
+         m = m+1;
+         if (m==nc); @Enumerated through all the alternatives@ @calculate the right lambda first@
+		   N_nc =  N_out+sumc((vqr[4,numout+1:m].*vqr[3,numout+1:m].*((vqr[2,numout+1:m]).^(1./(1-a[i,numout+1:m]))))'); 	
+		   D_nc =  D_out + sumc((vqr[4,numout+1:m].*vqr[3,numout+1:m])');
+		   lambda = (N_nc/D_nc)^(1-a[i,1]); // corrected lambda
+		   
+		   fc[1,1:numout] = ((vqr[2,1:numout]./lambda).^(1./(1-a[1,1:numout])));
+           fc[1,numout+1:nc] = (((vqr[2,numout+1:nc]./lambda).^(1./(1-a[i,numout+1:nc])))-ones(1,(nc-numout))).*(vqr[4,numout+1:nc]);
+           //fc[1,1:nc] = (dta[i,flagchm].*fc[1,1:nc])./(sumc((fc[1,1:nc])')); @Since all the nc are consumed, computing the proportion of consumption@
+           k=m;
+         elseif (m < nc);
+           N = N + (vqr[4,m]*vqr[3,m]*(vqr[2,m]^(1./(1-a[i,m])))); @Only adding the additional term@
+           D = D + (vqr[4,m]*vqr[3,m]);
+           lambda = (N/D)^(1-a[i,m]);
+           if (vqr[2,m+1]<lambda);
+             fc[1,1:numout] = ((vqr[2,1:numout]./lambda).^(1./(1-a[i,1:numout])));
+			 fc[1,numout+1:m] = (((vqr[2,numout+1:m]./lambda).^(1./(1-a[i,numout+1:m])))-ones(1,(m-numout))).*(vqr[4,numout+1:m]);
+             fc[1,m+1:nc] = zeros(1,nc-m);
+             k = m;
+           endif;  
+         endif;
+       endo;
+     endif;
+     vqr[2,1:nc] = fc; @Replace vqr with the calculated consumption@
+     vqr = sortr(vqr,1); @Sort by the alternative id@
+     v[((i-1)*nrep+r),1:nc] = vqr[2,.];  @Finally replacing the v matrix with consumption@
+	 //cons_final = cons_final|vqr[2,.];  @Finally replacing the v matrix with consumption@
+   endfor; @End of loop for error repetition@
+ endfor; @End of loop for individual@
+ nreps = seqa(1,1,nrep);
+ z = (seqa(1,1,e1).*.ones(nrep,1))~(ones(e1,1).*.nreps)~v;
+ retp(z);
+endp;
+
+
+@CHANGING FOR ACCOUNTING ADDITIVE BOTTOM NEST PARAMETERS IN THE TOP NEST@
+proc forecTop(x,dta,nc, nvarm, nvardel, nvargam, ivm, ivd, ivg, flagchm, eqmatdel, eqmatgam,numout );
+ local e1,popass,p0,xdel,xgam,v2,w2,u2,j,v,w,u,a,b,m,c,xsig,ylarge1,ylarge2,fin,ass,r,ylarge,vv,vlos,ut,p1,p2,p3,z,w1,z1,D;
+ local xthet,ddd,gr,ppp2,pp,ppl,k,v2s,pplnsum,xtheta,xsigm,xsigmm,N,m1,p211,p212,p213,p22,f1, cholesky; //uts;
+ local verr, fin1, as, prices, vqr,alts, fc, lambda, nreps, D_nc, N_nc, cons_final, as2, as_final, as1;
+ local xbeta, D_out, N_out;
+ local nobs;
+ local vbnf, xbetabn, xbetabnf, ncbn, ivmbn, nvarmbn, bn, v2bn, vbn ;
+ local alpha;
+ 
+ e1 = rows(dta);  nobs = e1;  //print "nobs: " nobs; //e1 contains the number of observations
+ //wt = dta[.,wtind]; //Get the weight in a column
+ xbeta = x[1:nvarm]; //print "xbase: " xbase;//Baseline utility parameters 
+ xdel  = eqmatdel'*(-1000); //print "xdel: " xdel;//Converts the no. of alpha parameters to be estimated to the total no. of alternatives, nc
+ xgam  = eqmatgam'*x[nvarm+1:nvarm+nvargam]; //print "xgam: " xgam;//same as above
+ cholesky  = upmat(xpnd(x[nvarm+nvargam+1:nvarm+nvargam+(nc*(nc+1)/2)])); //print "xcov: " xcov;//Get the cholesky factors - the upper triangular matrix
+ alpha = x[nvarm+nvargam+nc*(nc+1)/2+1:nvarm+nvargam+nc*(nc+1)/2+(nc-numout)];   // Alpha parameters specific for each nest
+ 
+ xbetabn = x[nvarm+nvargam+nc*(nc+1)/2+(nc-numout)+1:nvarm+nvargam+nc*(nc+1)/2+(nc-numout)+sumc(nvarmmb)];  // Bottom nest baseline utility parameters
+ 
+ vbnf = zeros(nobs,nc-numout); //This is the nobs by nc matrix that hold the final botto nest probability, there is no bottom nest in the first top nest
+ 
+ /* This loop is for creating the sum of the bottom nest utility */
+ @Run a loop to create@
+ for bn(1,(nc-numout),1);  // The loop run as many times as there are bottom nests, this nc is equal to nc_top
+	 ncbn = nc_bot[bn+numout]; // Number of alternatives in the bottom nest
+	 
+	// Take the appropriate beta and take ivm
+	 if (bn .== 1);
+		ivmbn = ivmmb[1:nvarmmb[bn]*nc_bot[bn+numout]];  //print "ivmbn: " ivmbn;
+		xbetabnf = xbetabn[1:nvarmmb[bn]];	//print "xbetabnf: " xbetabnf;
+	 else;
+	    ivmbn = ivmmb[sumc(nvarmmb[1:(bn-1)].*nc_bot[numout+1:(numout+bn-1)])+1:sumc(nvarmmb[1:bn].*nc_bot[numout+1:numout+bn])];	//print "ivmbn: " ivmbn;
+		xbetabnf = xbetabn[sumc(nvarmmb[1:(bn-1)])+1:sumc(nvarmmb[1:bn])];   //print "xbetabnf: " xbetabnf;
+	 endif;
+	
+	// Define nvarmbn
+	 nvarmbn = nvarmmb[bn];  //print "nvarmbn: " nvarmbn;
+	 v2bn = (ones(ncbn,1) .*. xbetabnf)*~(dta[.,ivmbn])'; 
+	 
+	 j = 1;
+	 vbn = {};
+	 do until j == ncbn+1;
+		vbn = vbn~(sumc(v2bn[(j-1)*nvarmbn+1:(j*nvarmbn),.])); //beta_hat*zee
+		j = j + 1;
+	endo;
+	// vbn is a nobs by ncbn matrix	
+	
+	//print "bn: " bn "meanc(vbn): " meanc(vbn)';
+	
+	 vbnf[.,bn] = sumc(vbn'); //Concatenating and summing up rowwise
+	 //print "bn: " bn "ncbn: " ncbn "xbetabnf: " xbetabnf' "ivmbn: " ivmbn "nvarbmn: " nvarmbn;
+	 clear ncbn, ivmbn, xbetabnf, nvarmbn, v2bn, vbn;
+ endfor;
+
+ @AT THE END OF CREATION OF vbnf, IT SHOULD BE A MATRIX OF SIZE NOBS BY (NC-NUMOUT)@
+ @NEXT STEP IS TO MULTIPLY THAT BY APPROPRIATE ALPHAS@
+ vbnf = (alpha *~ (vbnf'))';  @vbfn IS NOW A nobs by (nc-numout) matrix@
+
+
+//multiply the variables with the appropriate betas for all the alternatives
+ v2 = (ones(nc,1) .*. xbeta)*~(dta[.,ivm])'; 
+ w2 = (ones(nc,1) .*. xdel)*~(dta[.,ivd])';
+ u2 = (ones(nc,1) .*. xgam)*~(dta[.,ivg])'; 
+
+ j=1;
+ v = {};
+ w = {};
+ u = {};
+ alts = (seqa(1,1,nc))'; @A row vector of 1 to 5@
+ do until j == nc+1;
+   v = v~(sumc(v2[(j-1)*nvarm+1:(j*nvarm),.])); //beta_hat*zee
+   w = w~(sumc(w2[(j-1)*nvardel+1:(j*nvardel),.])); //alpha
+   u = u~(sumc(u2[(j-1)*nvargam+1:(j*nvargam),.])); //gamma
+   j = j+1;
+ endo;
+ 
+ clear v2,w2;
+
+
+ // Add the bottom nest utility with the top nest utility, vbnf will be equal to zero if nest != 0
+ v = v + (zeros(nobs,numout)~vbnf); // The first column of zero is for the top nest outside good
+  
+ @v, w and u are nobs by nc matrix@
+ v= exp(v); @This portion is the exp(beta_hat*z_sub_k), this portion will be the same given the values of the beta and z@
+ v = v.*.ones(nrep,1);@nobs*nrep by nc matrix@
+
+  /*open fin1 = ^outhalt for read;
+  call seekr(fin1,11); @Ignoring the first 11 halton draws@
+  as = readr(fin1,nrep*e1); @read total nobs*nrep rows from halton draw file@
+  as = as[.,1:nc];
+  as = cdfNi(as); @Converting uniform randoms into standard normals@
+  @ The inverse-normal proc produces very extreme values sometimes. This truncates.@
+  //as=as.*(as .le 10) + 10 .* (as .gt 10);
+  //as=as.*(as .ge -10) -10 .* (as .lt -10);
+  as = (cholesky*as')'; @Converting it to normal with appropriate covariance matrix of cholesky*cholesky'@
+  fin1 = close(fin1);
+  
+  
+  //as_final = as; 
+ */
+ 
+ as = {};
+ for(1,nrep,1);
+	{as1, seedNew} = rndn(nobs,nc,seedNew);
+	as = as|as1; @Concatenating column wise@
+ endfor;
+ 
+ 
+ @Modify the order of the halton draws@
+ as_final = {};
+ for n(1,nc,1);
+	 as2 = as[.,n];
+	 as2 = reshape(as2,nrep,e1)';
+	 as2 = reshape(as2,nrep*e1,1);
+	 as_final = as_final~as2;
+	 clear as2;
+ endfor;	 
+ //as = as_final;		//print "rows(as): " rows(as) "cols(as): " cols(as);
+ @as is nrep*e1 by nc matrix@
+ 
+ 
+ @Multiply by the cholesky matris@
+ as = (cholesky * as_final')';		//print "rows(as): " rows(as) "cols(as): " cols(as);
+ 
+ v = v.*exp(as); //exp(beta_hat*z)*exp(epsilon) = exp(beta_hat*z+epsilon)
+ // Price for each individual is repeated nobs times
+ v = v./(ones(e1,nc).*.ones(nrep,1)); //Price-normalized Baseline Utilities - price is a nbos by nc matrix, making it nobs*nrepxnc matrix
+ a = 1-(1./(1+exp(w))); // Alphas  //nobs by nc		//print "sumc(a): " sumc(a);
+ prices = ones(e1,nc); //flagprcm is a nobs by nc matrix
+ f1 = exp(u);           // Gammas //nobs by nc		//print "f: " f1;
+ 
+ for i(1,nobs,1); @Looping through the individuals@
+   for r(1,nrep,1); @Looping through the number of repititions@
+     fc = zeros(1,nc); @Place holder for holding generated cunsumptions@
+     vqr = {};
+     vqr = alts|v[((i-1)*nrep+r),.]|prices[i,.]|f1[i,.]; @vqr is a 4 by nc matrix@
+     //print "i: " i "vqr[4]: " vqr[4,.]; 
+	 vqr = vqr[.,1:numout]~(rev(sortr(vqr[.,numout+1:nc],2)')'); @sortr() sorts small to large@ @rev reverses the order of the rows in a matrix@
+     m = numout; @All the outside goods must be consumed@
+     k = -1;
+     
+	 @Calculate lambda - the lagrange multiplier, using the analytical expression 14, only valid is alpha is fixed across alternatives@
+     N_out = sumc((prices[i,1:numout].*((vqr[2,1:numout]).^(1./((1-a[i,1:numout])))))'); //N Calculation for only outside good consumption, if numout>1; sum up for all the outside goods
+     D_out = sumc((dta[i,flagchm])'); @Sum of the total expenditure is the E, just the sum of the total budget@
+     lambda = (N_out/D_out)^(1-a[i,1]); @lambda is the value of the lagrange multiplier@ @All the a are equal, does not matter which a you use@
+	 N = N_out; D = D_out; //To be used when m < nc
+	 
+     if (vqr[2,numout+1]<lambda);  @Only one good is consumed@ @Lambda is correctly calculated for one good@
+       @lambda is already calculated correctly previously@
+	   fc[1,1:numout] = ((vqr[2,1:numout]./lambda).^(1./((1-a[i,1:numout])))); // Allocation to the outside goods
+       fc[1,numout+1:nc] = zeros(1,nc-numout);
+     else;
+       do until k==m;
+         m = m+1;
+         if (m==nc); @Enumerated through all the alternatives@ @calculate the right lambda first@
+		   N_nc =  N_out+sumc((vqr[4,numout+1:m].*vqr[3,numout+1:m].*((vqr[2,numout+1:m]).^(1./(1-a[i,numout+1:m]))))'); 	
+		   D_nc =  D_out + sumc((vqr[4,numout+1:m].*vqr[3,numout+1:m])');
+		   lambda = (N_nc/D_nc)^(1-a[i,1]); // corrected lambda
+		   
+		   fc[1,1:numout] = ((vqr[2,1:numout]./lambda).^(1./(1-a[1,1:numout])));
+           fc[1,numout+1:nc] = (((vqr[2,numout+1:nc]./lambda).^(1./(1-a[i,numout+1:nc])))-ones(1,(nc-numout))).*(vqr[4,numout+1:nc]);
+           //fc[1,1:nc] = (dta[i,flagchm].*fc[1,1:nc])./(sumc((fc[1,1:nc])')); @Since all the nc are consumed, computing the proportion of consumption@
+           k=m;
+         elseif (m < nc);
+           N = N + (vqr[4,m]*vqr[3,m]*(vqr[2,m]^(1./(1-a[i,m])))); @Only adding the additional term@
+           D = D + (vqr[4,m]*vqr[3,m]);
+           lambda = (N/D)^(1-a[i,m]);
+           if (vqr[2,m+1]<lambda);
+             fc[1,1:numout] = ((vqr[2,1:numout]./lambda).^(1./(1-a[i,1:numout])));
+			 fc[1,numout+1:m] = (((vqr[2,numout+1:m]./lambda).^(1./(1-a[i,numout+1:m])))-ones(1,(m-numout))).*(vqr[4,numout+1:m]);
+             fc[1,m+1:nc] = zeros(1,nc-m);
+             k = m;
+           endif;  
+         endif;
+       endo;
+     endif;
+     vqr[2,1:nc] = fc; @Replace vqr with the calculated consumption@
+     vqr = sortr(vqr,1); @Sort by the alternative id@
+     v[((i-1)*nrep+r),1:nc] = vqr[2,.];  @Finally replacing the v matrix with consumption@
+	 //cons_final = cons_final|vqr[2,.];  @Finally replacing the v matrix with consumption@
+   endfor; @End of loop for error repetition@
+ endfor; @End of loop for individual@
+ nreps = seqa(1,1,nrep);
+ z = (seqa(1,1,e1).*.ones(nrep,1))~(ones(e1,1).*.nreps)~v;
+ retp(z);
+endp;

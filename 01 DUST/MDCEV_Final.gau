@@ -1,0 +1,545 @@
+//Bhat's MDCEV code
+
+library maxlik;
+maxset; //reset global variables in the successive execution of the file
+
+/*****************************************************************************
+                  Global Variable Definitions
+*****************************************************************************/
+clearg __row,nobs,_config,_alp0to1,_price,nc,datatset,_po,nvarm,nvardel,nvargam; //clears global symbols by setting them eqaul to zero
+
+__row    = 100;     // Number of rows to be read at a time by the log-likelihood function
+nobs     = 1452;    // Number of observations in the dataset
+_config  = 4;       // Utility specification configuration, possible values: 1,4,7
+                    // see the documentation for an explanation of each configuration
+_alp0to1 = 1;       // 1 if you want the Alpha values to be constrained between 0 and 1, 0 otherwise
+                    // putting _alp0to1 = 1 is recommended practice and can provide estimation stability
+_price   = 0;       // 1 if there is price variation across goods, 0 otherwise
+nc       = 8;       // Number of alternatives (in the universal choice set) 
+
+//dataset  = "d:\\gauss\\com\\mdcevcode\\testnout"; // provide path for the gauss data matrix
+dataset  = "DataDUSTV28";
+
+{ pointer,_po } = indices(dataset,"CaseID"); // position of pointer to case number in data set, 
+                                             // modify if the case number column has a name different than "caseid"
+
+/*****************************************************************************
+                    Variable Specification Area
+*****************************************************************************/
+/* Position of UNO variable (i.e., the column of ones) in data set. 
+   The dataset should consist of a column of ones.
+   Modify if the label (in double-quotes) of the column of ones in your dataset is different from "uno"  */
+
+{ unov,ivuno } = indices(dataset,"uno");
+
+/* Position of SERO variable (i.e., the column of zeros) in data set. 
+   The dataset should consist of a column of zeros.
+   Modify if the label (in double-quotes) of the column of zeros in your dataset is different from "sero"  */
+
+{ serov,ivsero } = indices(dataset,"sero");
+
+/* Position of WEIGHT variable (i.e., the column of weights).
+   If the data has weights, then the dataset should consist of a column of weights.
+   Modify the label (in double-quotes) with the label of the weight variable, if your data has weights  */
+
+{ weight,wtind } = indices(dataset,"uno");
+
+/* Positions of the DEPENDENT Variables (i.e., the consumption quantities for each alternative - NOT consumption expenditures for each alternative).  
+   Provide labels (one label in each double-quote) of the dependent variables (i.e., consumption quantities) in your dataset. 
+   Number of labels = number of alternatives. */
+
+/* Note however that the likelihood function is written to be based on the probability of consumption expenditures - Equation 19 of Bhat 2008. */
+
+{ choicm,f } = indices(dataset,"MealHome"|	"MealOut"|	"Work2Dur"|	"SocHome"|	"SocOut"|	"Chores"|	"Shopping"|	"Leisure"); 
+
+/* Positions of PRICE variables
+   Provide labels of price variables (one label in each double-quote). Number of labels = number of alternatives.
+   Provide all UNO variables if there is no price variation */
+
+{ cprice,fp } = indices(dataset,"uno"|"uno"|"uno"|"uno"|"uno"|"uno"|"uno"|"uno");
+
+/* Definition of INDEPENDENT variables */
+
+/* In the following specification, ivm1, ivm2, ivm3 contain independent variable specifications (on right hand side) for baseline utility (PSI) for alternatives 1, 2, and 3;
+   Add a row for ivm4 below if there is a 4th alternative, another addiitonal row for ivm5 if there is a 5th alternative, ...  (number of rows = number of alternatives);
+   Number of columns = Number of variables including alternative specific constants; consider first alternative as base  */
+
+let ivm1 = { sero           sero            sero            sero  		sero           sero            sero  sero            sero            sero  		sero           sero           sero            sero            sero           sero 	sero 	sero 	sero 	   	sero 	sero 	sero 	sero 	sero 	sero 	sero 	sero 	sero 	sero 			sero 		sero 		sero sero sero 	sero 	sero 	sero 	sero	sero 	sero 	sero 	sero	sero 		sero 		sero 		sero 		sero 	sero 	sero  sero  sero  sero  sero  sero  sero  sero  sero  sero  sero  sero   sero	sero  sero  sero  sero  sero  sero  sero	sero	sero sero sero sero sero sero sero sero sero };
+let ivm2 = { uno            sero            sero          	sero  		sero           sero            sero  sero            sero            sero  		sero           inc2           sero            inc3            inc4           sero 	sero 	sero 	sero 	   	sero 	sero 	sero 	sero 	sero 	sero 	sero 	sero 	sero 	sero 			sero 		sero 		sero sero Home 	sero 	sero 	sero 	sero  	sero 	sero 	sero 	sero 	sero 		sero 		sero 		VehDum2 	sero 	sero 	race2 sero  sero  sero  sero  race4 sero  sero  sero  sero  sero  sero   sero 	sero  sero  sero  sero  sero  sero  sero	sero  	sero Job2 sero sero sero sero Job3 sero sero };         
+let ivm3 = { sero           uno             sero            sero 		sero           sero            sero  female          sero            sero  		sero           sero           sero            sero            sero           age65 sero 	sero 	sero 	   	age80 	sero 	sero 	sero 	sero 	sero 	sero 	sero 	sero 	MemProb 		sero 		sero 		sero sero sero 	sero 	sero 	sero 	sero  	gradPG 	sero 	sero 	sero 	sero 		sero 		sero 		sero 		sero 	sero 	sero  sero  sero  sero  sero  sero  sero  sero  sero  WkEnd sero  sero   sero 	sero  sero  sero  sero  sero  sero  sero	sero  	sero sero Job2 sero sero sero sero sero sero };
+let ivm4 = { sero           sero            uno            	sero  		sero           sero            sero  sero            female          sero  		sero           sero           sero            sero            sero           sero 	sero 	sero 	sero 	   	sero 	sero 	sero 	sero 	DalErr 	sero 	sero 	sero 	sero 	sero 			sero 		sero 		sero sero sero 	Home 	sero 	sero 	sero  	sero 	AdDummy sero 	sero 	sero 		sero 		sero 		sero 		sero 	sero 	sero  race2  sero sero  sero sero  sero  sero  sero  sero  sero  sero   sero 	sero  sero  sero  sero  sero  sero  sero	Fin2  	Fin3 sero sero sero sero sero sero sero sero };
+let ivm5 = { sero           sero            sero          	uno  		sero           sero            sero  sero            sero            female  	sero           sero           sero            sero            sero           sero 	age65 	sero 	sero 	   	sero 	age80 	sero 	sero 	sero 	DalErr 	sero 	sero 	sero 	sero 			MemProb 	sero 		Work sero sero 	sero 	Home 	sero 	sero  	sero 	sero 	sero 	sero 	ChildNum 	sero 		sero 		sero 		VehDum2 sero 	sero  sero  race2 sero  sero sero  race4 sero  sero  sero  WkEnd sero   sero 	life2  sero  sero sero  sero  sero  sero	sero  	sero sero sero Job2 sero sero sero sero sero };
+let ivm6 = { sero           sero            sero            sero  		uno            sero            sero  sero            sero            sero  		female         sero           sero            sero            sero           sero 	sero 	age65 	sero 	   	sero 	sero 	age80 	sero 	sero 	sero 	DalErr 	sero 	sero 	sero 			sero 		MemProb 	sero sero sero 	sero 	sero 	Home 	sero  	sero 	sero 	sero 	sero 	sero 		ChildNum 	sero 		sero 		sero 	sero 	sero  sero  sero  sero  sero sero  sero  sero  sero  sero  sero  WkEnd  sero 	sero  life2  sero life3  sero sero  sero	sero  	sero sero sero sero Job2 sero sero Job3 sero };
+let ivm7 = { sero           sero            sero            sero  		sero           uno            sero   sero            sero            sero  		sero           sero           sero            sero            sero           sero 	sero 	sero 	age65 	   	sero 	sero 	sero 	age80 	sero 	sero 	sero 	DalErr 	sero 	sero 			sero 		sero 		sero Work sero 	sero 	sero 	sero 	sero  	sero 	sero 	AdDummy sero 	sero 		sero 		sero 		sero 		sero 	VehDum2 sero  sero  sero  race2  sero sero  sero  race4 sero sero  sero  sero   sero 	sero  sero  life2 sero  life3 sero  sero	sero  	sero sero sero sero sero Job2 sero sero Job3 };
+let ivm8 = { sero           sero            sero          	sero  		sero           sero            uno   sero            sero            sero  		sero           sero           inc2            sero            sero           sero 	sero 	sero 	sero 	   	sero 	sero 	sero 	sero 	sero 	sero 	sero 	sero 	WakProb sero 			sero 		sero 		sero sero sero 	sero 	sero 	sero 	Home  	sero 	sero 	sero 	AdDummy sero 		sero 		ChildNum 	sero 		sero 	sero 	sero sero  sero  sero  race2 sero  sero  sero  race4 sero  sero  sero   WkEnd 	sero  sero  sero  sero  sero  Hel2  Hel3	sero  	sero sero sero sero sero sero sero sero sero };
+//let ivm9 = {};
+/* The above specification is for the following baseline utility expressions
+
+Psi1 = exp( beta1*0     +  beta2*0     +   beta3*0      +  beta4*0)
+Psi2 = exp( beta1*1     +  beta2*0     +   beta3*hhsize +  beta4*0)
+Psi3 = exp( beta1*0     +  beta2*1     +   beta3*0      +  beta4*hhzise)    */
+
+//Add a row for v4 below if there is a 4th alternative, another additional row for v5 if there is a 5th alternative,.... (number of rows = number of alternatives)
+
+{ v1,ivmt1 } = indices(dataset,ivm1');//ivmt1 corresponds to the column numbers associated with the Ind var in the data set
+{ v2,ivmt2 } = indices(dataset,ivm2');
+{ v3,ivmt3 } = indices(dataset,ivm3');
+{ v4,ivmt4 } = indices(dataset,ivm4');
+{ v5,ivmt5 } = indices(dataset,ivm5');
+{ v6,ivmt6 } = indices(dataset,ivm6');
+{ v7,ivmt7 } = indices(dataset,ivm7');
+{ v8,ivmt8 } = indices(dataset,ivm8');
+//{ v9,ivmt9 } = indices(dataset,ivm9');
+
+/* Define labels of the parameters in the baseline utility for output printing;
+   Provide as many parameter labels as the number of columns in ivm1 (i.e., the number of variables in the Psi function) */
+
+varnam =  "ASC2"|"ASC3"|"ASC4"|"ASC5"|"ASC6"|"ASC7"|"ASC8"| "female3"|	"female4"|	"female5"|	"female6"|	"inc2_2"|"inc2_8"|"inc3_2"|	"inc4_2"|	"age65_3"|	"age65_5"|	"age65_6"|	"age65_7"|	"age80_3"| "age80_5"|"age80_6"|	"age80_7"|"DalErr4"|"DalErr5"|"DalErr6"|"DalErr7"|"WakProb8"|"MemProb3"|"MemProb5"|"MemProb6"|"Work5"|"Work7"|"Home2"|"Home4"|"Home5"|"Home6"|"Home8"|"edu3"|"Adult4"|"Adult7"|"Adult8"|"Child5"|"Child6"|"Child8"|"VehDum2"|"VehDum5"|"VehDum7"|"race2_2"|"race2_4"|"race2_5"|"race2_7"|"race2_8"|"race4_2"|"race4_5"|"race4_7"|"race4_8"|"WkEnd3"|"WkEnd5"|"WkEnd6"|"WkEnd8"|"life2_5"|"life2_6"|"life2_7"|"life3_6"|"life3_7"|"Hel2_8"|"Hel3_8"|"Fin2_4"|"Fin3_4"|"Job2_2"|"Job2_3"|"Job2_5"|"Job2_6"|"Job2_7"|"Job3_2"|"Job3_6"|"Job3_7"; 
+
+
+/* In the following specification, ivd1, ivd2, ivd3 contain input data specifications (on right hand side) for satiation parameters (Alphas) for alternatives 1, 2, and 3;
+   Add a row below for ivd4 if there is a 4th alternative, another additional row for ivd5 if there is a 5th alternative,.... (number of rows = number of alternatives);
+   Number of columns = Number of alternatives; Note that you can also add individual-specific variables below, so that satiation varies across individuals; However,
+   you will then have to translate outputs to compute actual alpha parameters; This code is written to provide you with the alpha parameters directly for the case when
+   there is no variation in alpha across individuals */
+
+/*let ivd1 = { uno            sero            sero   sero           sero            sero sero           sero            sero 	LifeS	JobSat	MemS	HealthS	FinS	sero	sero	sero	sero	sero	sero	sero	sero	sero	sero	sero	sero };
+let ivd2 = { sero           uno             sero    sero           sero            sero sero           sero            sero sero	sero	sero	sero	sero	JobSat	sero	sero	sero	sero	sero	sero	sero	sero	sero	sero	sero };
+let ivd3 = { sero           sero            uno    sero           sero            sero sero           sero            sero 	sero	sero	sero	sero	sero	sero	sero	sero	sero	sero	sero	sero	sero	sero	sero	sero	sero };
+let ivd4 = { sero            sero            sero uno           sero            sero sero           sero            sero  	sero	sero	sero	sero	sero	sero	MemS	sero	sero	sero	sero	sero	sero	sero	sero	sero	sero };
+let ivd5 = { sero           sero             sero  sero           uno            sero sero           sero            sero  	sero	sero	sero	sero	sero	sero	sero	JobSat	HealthS	sero	sero	sero	sero	sero	sero	sero	sero };
+let ivd6 = { sero           sero            sero  sero           sero            uno sero           sero            sero  	sero	sero	sero	sero	sero	sero	sero	sero	sero	JobSat	sero	sero	sero	sero	sero	sero	sero };
+let ivd7 = { sero            sero            sero   sero           sero            sero uno           sero            sero  sero	sero	sero	sero	sero	sero	sero	sero	sero	sero	JobSat	MemS	HealthS	sero	sero	sero	sero };
+let ivd8 = { sero           sero             sero sero           sero            sero sero           uno            sero   	sero	sero	sero	sero	sero	sero	sero	sero	sero	sero	sero	sero	sero	JobSat	sero	sero	sero };
+let ivd9 = { sero           sero            sero  sero           sero            sero sero           sero            uno 	sero	sero	sero	sero	sero	sero	sero	sero	sero	sero	sero	sero	sero	sero	JobSat	HealthS	FinS };*/
+
+let ivd1 = { uno            sero            sero   sero           sero            sero sero           sero           };
+let ivd2 = { sero           uno             sero    sero           sero            sero sero           sero          };
+let ivd3 = { sero           sero            uno    sero           sero            sero sero           sero           };
+let ivd4 = { sero            sero            sero uno           sero            sero sero           sero            };
+let ivd5 = { sero           sero             sero  sero           uno            sero sero           sero           };
+let ivd6 = { sero           sero            sero  sero           sero            uno sero           sero            };
+let ivd7 = { sero            sero            sero   sero           sero            sero uno           sero          };
+let ivd8 = { sero           sero             sero sero           sero            sero sero           uno            };
+//let ivd9 = { sero           sero            sero  sero           sero            sero sero           sero            uno 	};
+
+/* The above specification is for the following definitions of Satiation parameters 
+
+Delta1 = ( theta1*1    + theta2*0     +  theta3*0) = theta1
+Delta2 = ( theta1*0    + theta2*1     +  theta3*0) = theta2
+Delta3 = ( theta1*0    + theta2*0     +  theta3*1) = theta3
+
+Alpha = 1-exp(Delta) if Alpha < 1
+Alpha = 1-(1/(1+exp(Delta))) if 0 < Alpha < 1   */
+
+//Add a row for w4 below if there is a 4th alternative,..... (number of rows = number of alternatives)
+
+{ w1,ivdt1 } = indices(dataset,ivd1');//invdt1: column 2 3 3
+{ w2,ivdt2 } = indices(dataset,ivd2');//...
+{ w3,ivdt3 } = indices(dataset,ivd3');
+{ w4,ivdt4 } = indices(dataset,ivd4');
+{ w5,ivdt5 } = indices(dataset,ivd5');
+{ w6,ivdt6 } = indices(dataset,ivd6');
+{ w7,ivdt7 } = indices(dataset,ivd7');
+{ w8,ivdt8 } = indices(dataset,ivd8');
+//{ w9,ivdt9 } = indices(dataset,ivd9');
+
+
+/* In the following specification, ivg1, ivg2, ivg3 contain input data specifications (on the right hand side) for translation parameters (Gammas) for alternatives 1, 2, and 3
+   Add a row for ivg4 if there is a 4th alternative another additional row for ivd5 if there is a 5th alternative,.... (number of rows = number of alternatives)
+   Number of columns = Number of alternatives; Note that you can also add individual-specific variables below, so that gamma varies across individuals; However,
+   you will then have to translate outputs to compute actual gamma parameters; This code is written to provide you with the gamma parameters directly for the case when
+   there is no variation in gamma across individuals */
+let ivg1 = { uno     sero     sero   sero   sero    sero 	sero    sero 	female sero  	sero 	sero 	sero    sero 	sero  sero     sero     sero    sero 	sero    sero   Hel2  sero   Hel3   sero		sero	sero 	sero 	sero	sero  sero  sero sero  sero 	sero 	sero };
+let ivg2 = { sero    uno      sero   sero   sero    sero 	sero    sero 	sero   sero  	sero 	sero 	sero    sero 	sero  sero     sero     sero    sero 	life3   sero   sero  sero   sero   sero 	sero 	sero 	sero    sero 	sero  sero  sero WkEnd sero 	sero 	sero };
+let ivg3 = { sero    sero     uno    sero   sero    sero	sero    sero 	sero   sero  	sero 	sero 	sero    sero 	sero  sero     sero     sero    sero 	sero   life3   sero  sero   sero   sero 	sero 	Mem2 	Mem3    sero 	sero  sero  sero sero  sero 	sero 	sero } ;
+let ivg4 = { sero    sero     sero 	 uno    sero    sero 	sero    sero 	sero   female  sero 	sero 	sero    sero 	inc3  sero     sero     sero    sero 	sero    sero   sero  sero   sero   Hel3 	sero 	sero 	sero    sero 	sero  Job2  sero sero  sero 	sero 	sero };
+let ivg5 = { sero    sero     sero   sero   uno     sero 	sero    sero 	sero   sero  	sero 	sero 	inc2    sero 	sero  inc3     sero     inc4	sero  	sero    sero   sero  sero   sero   sero 	sero 	sero 	sero    Fin3 	sero  sero  sero sero  WkEnd 	sero 	sero };
+let ivg6 = { sero    sero     sero   sero   sero    uno 	sero    sero 	sero   sero  	female 	sero 	sero    sero 	sero  sero     inc3     sero    inc4 	sero    sero   sero  Hel2   sero   sero 	Hel3 	sero 	sero    sero 	sero  sero  Work sero  sero  	sero 	sero };
+let ivg7 = { sero    sero     sero   sero   sero    sero 	uno     sero 	sero   sero  	sero 	sero 	sero    sero 	sero  sero     sero     sero    sero 	sero    sero   sero  sero   sero   sero 	sero 	sero 	sero    sero 	Fin3  sero  sero sero  sero 	WkEnd 	sero };
+let ivg8 = { sero    sero     sero   sero   sero    sero 	sero    uno  	sero   sero  	sero	female 	sero    inc2 	sero  sero     sero     sero    sero 	sero    sero   sero  sero   sero   sero 	sero 	sero 	sero    sero 	sero  sero  sero sero  sero 	sero 	WkEnd };//let ivg9 = { sero           sero            sero  sero           sero            sero sero           sero            uno    };
+
+/* The above specification is for the following definitions of Translation parameters 
+
+Gamma1 = exp( phi1*1         + phi2*0     +  phi3*0) = exp(phi1)
+Gamma2 = exp( phi1*0         + phi2*1     +  phi3*0) = exp(phi2)
+Gamma3 = exp( phi1*0         + phi2*0     +  phi3*1) = exp(phi3)   */
+
+//Add a row for u4 below if there is a 4th alternative,... (number of rows = number of alternatives)
+
+{ u1,ivgt1 } = indices(dataset,ivg1');//ivgt1: column vector 2 3 3
+{ u2,ivgt2 } = indices(dataset,ivg2');
+{ u3,ivgt3 } = indices(dataset,ivg3');
+{ u4,ivgt4 } = indices(dataset,ivg4');
+{ u5,ivgt5 } = indices(dataset,ivg5');
+{ u6,ivgt6 } = indices(dataset,ivg6');
+{ u7,ivgt7 } = indices(dataset,ivg7');
+{ u8,ivgt8 } = indices(dataset,ivg8');
+//{ u9,ivgt9 } = indices(dataset,ivg9');
+
+
+ivm = ivmt1'~ivmt2'~ivmt3'~ivmt4'~ivmt5'~ivmt6'~ivmt7'~ivmt8'; // can append more: e.g. ~ivmt4'~ivmt5' and so on, based on the number of alternatives
+ivd = ivdt1'~ivdt2'~ivdt3'~ivdt4'~ivdt5'~ivdt6'~ivdt7'~ivdt8'; // can append more: e.g. ~ivdt4'~ivdt5' and so on, based on the number of alternatives
+ivg = ivgt1'~ivgt2'~ivgt3'~ivgt4'~ivgt5'~ivgt6'~ivgt7'~ivgt8'; // can append more: e.g. ~ivgt4'~ivgt5' and so on, based on the number of alternatives
+
+nvarm = cols(ivm1);     // number of variables in baseline utility   = number of columns in ivm1, do not modify this
+nvardel = cols(ivd1);   // number of variables in satiation          = number of columns in ivd1, do not modify this
+nvargam = cols(ivg1);   // number of variables in translation        = number of columns in ivg1, do not modify this
+
+// Associating columns with variable names
+flagchm = f';
+flagavm = ivuno~ivuno~ivuno~ivuno~ivuno~ivuno~ivuno~ivuno;//Append as many "ivuno" as the number of alternatives 
+                            //(all alternatives are considered to be available; if an alternative is not available, use ivsero for that alternative).
+flagprcm = fp';
+
+
+/******************************************************************************
+                          Starting values
+******************************************************************************/
+/* Creating matrices (EQMATDEL and EQMATGAM) of ones and zeros to define constraints across coefficients of variables;
+
+   EQMATDEL should have as many columns as the number of variables in ivd1, ivd2... specifications (i.e., specifications for satiation/alpha parameters) 
+   and as many rows as the number of distinct parameters. So if you have 5 alpha parameters, and the first two are constrained to be the same, 
+   the next two are constrained to be the same, and the last separate; then the EQMATDEL matrix will be:
+   
+   EQMATDEL = { 1 1 0 0 0  ,
+                0 0 1 1 0  ,
+                0 0 0 0 1  };
+
+   EQMATGAM should have as many columns as the number of variables in ivg1, ivg2... specifications (i.e., specifications for translation/gamma parameters) 
+   and as many rows as the number of distinct parameters. So if you have 5 gamma parameters, and the first two are constrained to be the same, 
+   the next two are constrained to be the same, and the last separate; then the EQMATGAM matrix will be:
+   
+   EQMATGAM = { 1 1 0 0 0  ,
+                0 0 1 1 0  ,
+                0 0 0 0 1  };       */
+
+/* Below is the code for defining EQMATDEL and EQMATGAM matrices; 
+   These definitions correspond to restricted estimations of the alpha and gamma parameters across alternatives based on the configuration specified (see documentation) */
+
+ if _config==1;
+   EQMATDEL = eye(nvardel);//Identity matrix, since want to estimate three alpha
+   EQMATGAM = ones(1,nc); //All gamma are restricted to one, so one row and three column
+   b = zeros(nvarm,1)|zeros(rows(EQMATDEL),1)|zeros(rows(EQMATGAM),1);//Specifying starting value for configuration 1
+   _max_active = ones(nvarm+rows(eqmatdel),1)|zeros(rows(eqmatgam),1);//Specifying which parameter to estimate and which one to fix to zero
+ elseif _config==4;
+   EQMATDEL = ones(1,nc);
+   EQMATGAM = eye(nvargam);
+    b = zeros(nvarm,1)|-1000*ones(rows(EQMATDEL),1)|zeros(rows(EQMATGAM),1);//Why fixing alpha to -1000?
+   _max_active = ones(nvarm,1)|zeros(rows(eqmatdel),1)|ones(rows(eqmatgam),1);
+ elseif _config==7;
+   EQMATDEL = ones(1,nc);
+   EQMATGAM = eye(nc);
+   b = zeros(nvarm,1)|-1000*ones(rows(EQMATDEL),1)|zeros(rows(EQMATGAM),1); //Why fixing alpha to -1000?
+   _max_active = ones(nvarm,1)|zeros(rows(eqmatdel),1)|zeros(rows(eqmatgam),1);
+ endif;
+
+
+/* Defining variable labels in satiation and translation parameter terms for output printing */
+
+  varndell = 0 $+ "D" $+ ftocv(seqa(1,1,rows(eqmatdel)),2,0);//seqa(start, increment, total_number)
+  varngam = 0 $+ "G" $+ ftocv(seqa(1,1,rows(eqmatgam)),2,0);//ftocv(numeric to be converted, minimum filed, decimal point prec)
+															//0 $+ = force the type to be a matrix, result: D01, D02, D03
+
+b = b|1;                            // 1 appended as a starting value for the scale parameter
+
+if _price == 1;
+  _max_active = _max_active|1;      // scale estimated if the data contains price variation
+else;
+  _max_active = _max_active|0;      // scale fixed to 1 if the data does not contain price variation
+endif; 
+
+// You can also provide your own starting values
+
+
+/* Other Maxlik globals */
+
+_max_ParNames = varnam|varndell|varngam|"sigm";     // Appending all the parameter (or coefficient) names
+_max_GradProc=&lgd;             
+_max_Options = { bfgs stepbt };
+_max_CovPar = 1;        // modify according to the type of standard errors you need
+//1 provides the inverse of the hessian
+
+/******************************************************************************
+// ACTUAL PROGRAM AREA BEGINS, YOU DO NOT HAVE TO MODIFY ANYTHING BELOW THIS LINE
+// Format of outputs is provided in the documentation
+// Note that for the same variable specification, the number of parameters in the output depends upon the chosen configuration (i.e., _config) of the utility function 
+// Last parameter corresponds to scale, which is restricted to 1 if there is no price variation in the data
+******************************************************************************/
+
+{ x,f,g,cov,retcode } = maxprt(maxlik(dataset,0,&lpr,b));//Takes the output given by maxlik and prints it to the right hand side variables
+														//Getting the values from lpr	
+
+// The above line calls the procedures that provide as output the parameterized versions of Alphas and Gammas, and prints the outputs
+
+// The following code passes those parameters into another procedure (lpr1) to obtain the actual values of Alphas and Gammas, along with appropriate standard errors and t-statistics, and print the outputs
+
+//clearg _max_gradproc;
+
+/*Takes delta and lambda and convert them to alpha and gamma*/
+/*if _alp0to1 == 0;//If alpha less than 1, can take negative values
+ b = x[1:nvarm]|1-exp(x[nvarm+1:nvarm+rows(eqmatdel)])|exp(x[nvarm+rows(eqmatdel)+1:nvarm+rows(eqmatdel)+rows(eqmatgam)])|x[nvarm+rows(eqmatdel)+rows(eqmatgam)+1];//x contains the estimated values of the parameters
+else; // If alpha greater than 0 and less than 1
+ b = x[1:nvarm]|(1/(1+exp(-x[nvarm+1:nvarm+rows(eqmatdel)])))|exp(x[nvarm+rows(eqmatdel)+1:nvarm+rows(eqmatdel)+rows(eqmatgam)])|x[nvarm+rows(eqmatdel)+rows(eqmatgam)+1];
+endif;*/
+
+/* Normally would not need to restrict iterations to get alpha and gamma parameters directly to zero, because unparameterized and parameterized values should be the same;
+   however, in some cases, such as _alp0to1=1, your parameterized form will guarantee alpha to be between 0 to 1, but direct estimation can get you negative value; Thus,
+   not allowing optimization when undertaking direct estimation; when _alp0to1 = 0, you can take this next line out */
+   
+ //_max_Maxiters = 0;  
+
+//{ x,f,g,cov,retcode } = maxprt(maxlik(dataset,0,&lpr1,b));//Pass the converted alpha and gamma to the maxlik to obtain desired estimates, st. errors and t-stats
+														 //Submitting the values to lpr1	
+
+/******************************************************************************
+                          Procedure definitions begin
+******************************************************************************/
+
+/* procedure for log likelihood function calculation */
+proc lpr(x,dta);
+ local e1,popass,p0,xdel,xgam,v2,w2,u2,j,v,w,u,a,b,m,c,xsig,ylarge1,ylarge2,fin,as,ass,r,err,ylarge,
+   xsigm,vv,vlos,e,ut,p1,p2,p3,z,w1,z1,d,f,wt;
+ e1 = rows(dta); //Number of rows in the data file (??)
+ wt = dta[.,wtind];	//wtind - contains the indicator of uno in the data file
+ popass = dta[.,_po]; //Index of the case id in the data set
+ xdel = eqmatdel'*x[nvarm+1:nvarm+rows(eqmatdel)]; //xdel is a 3 by 1 column vector: Imp - conveting xdel from number of variables to be estimated to the number of alternatives
+ xgam = eqmatgam'*x[nvarm+rows(eqmatdel)+1:nvarm+rows(eqmatdel)+rows(eqmatgam)]; //xgam is a 3 by 1 column vector: : Imp - conveting xgam from number of variables to be estimated to the number of alternatives
+ xsigm = x[nvarm+rows(eqmatdel)+rows(eqmatgam)+1];
+ v2 = (ones(nc,1) .*. x[1:nvarm])*~(dta[.,ivm])'; //x.*.z = tensor product, every element in x will be multiplied by all elements in z
+ //ones(nc,1): produces column vector of one for alternative numbers
+ //multiply the column vector by the betas and make it a column of size n times number of betas (n = no. of alernatives)
+ //Multiply that with the appropriate columns of the data matrix for each individual
+ w2 = (ones(nc,1) .*. xdel)*~(dta[.,ivd])'; //*~ = horizontal direct product, the number of rows in the matrices need to be the same
+ u2 = (ones(nc,1) .*. xgam)*~(dta[.,ivg])';
+
+ /*Note For me: v2 is a 12 by 1000 matrix in this case, 12 ( 3 alternatives and 4 coefficients total to be estimated)
+ 1000 is the number of observations. it contains the multiplictaion of the coefficients and the variables. The first 4 row of each column
+ corresponds to the utility of 1st alternative for each individual and so on*/
+ 
+  /*Note For me: w2 parameterized delta for each obs, a 9 by 1000 matrix in this case
+  3 rows corresponding to delta of each alternative, 1000 corresponding to the number of individual*/
+ 
+ /* During the parameter search, sometimes the value of x[rows(x)] (i.e., the scale parameter) may go below 0. 
+    The command below helps the iterations get back on track. Note that final results will generally not be affected by this; 
+    If affected, you will get a negative value printed for sigm (scale) in the output   */
+
+ if xsigm<=0;
+   xsigm=1;
+ endif;
+
+/*The do loop below calculate the utilities for each alternative for each individual*/
+ j=1;
+ v = {};
+ w = {};
+ u = {};
+ do until j == nc+1;
+   //Sum the portion of utilities for each alternative for all individual, concatenate as columns			
+   v = v~(sumc(v2[(j-1)*nvarm+1:(j*nvarm),.])); // sumc: sum accross rows for individual, basically summing up the portion of utilities for each alternative
+   w = w~(sumc(w2[(j-1)*nvardel+1:(j*nvardel),.]));
+   u = u~(sumc(u2[(j-1)*nvargam+1:(j*nvargam),.]));
+   j = j+1;
+ endo;
+ 
+ /*v, w and u are 1000(where nc is the number of alternatives) by nc matrix*/
+//v contains marginal utility for each individual, w contains the delta for each individaul, u contains gamma for each individual
+
+
+ clear v2,w2; // why and why not u2?
+
+ a = exp(w); /* a is (1-Alpha) , since w is the delta*/
+ if _alp0to1;
+   a = 1/(1+exp(w)); /*Here also a is (1 - Alpha)*/
+ endif;
+
+ f = exp(u); /*f is gamma, gamma needs to be always positive*/ //1000 by 3
+ b = dta[.,flagchm] .> 0;//Dummy for each individual and each alternative whether consumption is zero or not
+ m = sumc((b')); /*m contains for each individual how many goods have been consumed - its M in the paper*/
+ /*m is M is the paper formulation*/
+ /*Consumption pattern formulae has been used for probability calculation*/
+ c = (a.*b)./((dta[.,flagchm]+f)); //(c = (1 - alpha)/(consumption + gamma)), ccalculated for each individual for each alternative, 1000 by 3 matrix
+ /*c is f in the paper, a is (1- alpha), multiplying by b making it zero for the alt that has not been consumed*/
+ c = c./(dta[.,flagprcm]); //since some of the f are zero, so doing f/p first instead of p/f as in the paper
+ c = substute(c,b.==0,1); //substitute c to 1 if corresponding b is zero(no good consumed)
+ e = (1/c).*b;  //e is p by f, but making it zero for those where the alternative is not consumed
+ d = sumc((e')); //d is a column vector of size 1000
+ c = (prodc((c'))).*d; //But this c should be c without diving by p
+ v = v-a.*ln((dta[.,flagchm]+f)./f)-ln(dta[.,flagprcm]);/*V from equation 16*/
+ /*Fine*/
+ ut = v./xsigm; /*Utility v by sigma*/
+ p1 = exp(ut); /*Exponent of utility*/
+ p2 = (p1.*dta[.,flagavm])./sumc((p1.*dta[.,flagavm])');
+ p3 = substute(p2,b.==0,1);
+ p3 = (prodc((p3'))).*c.*((m-1)!);
+ p3 = p3./((xsigm)^(m-1));
+ /*Where is the 1/p(i) term??*/
+ z = p3;
+ w1=zeros(e1,1);
+ if z > w1;/*> sign doing element by element comparison??*/
+     z1=ln(z);
+  else;
+  print "yes";
+     z1=ln(z-((z.<=w1).*(z-0.0001)));//If zero or negative taking ln of 0.0001 - why???
+ endif;
+ retp(wt.*z1);
+endp;
+/*One problems with the above function - 
+While taking the product of f - its actually taking the product of f by p
+Not a problem if p is 1, but is a problem if p is something other than 1*/
+
+
+/* Procedure for gradient function correspondign to the above log-likelihood fucntion, lpr*/
+proc lgd(x,dta);
+ local e1,popass,p0,xdel,xgam,v2,w2,u2,j,v,w,u,a,b,m,c,xsig,ylarge1,ylarge2,fin,as,ass,r,err,ylarge,
+   vv,vlos,ut,uts,f1,p1,p2,p3,z,w1,z1,d,e;
+ local gv,gd,gg,gge,g1,g1s,g2,h,g2v,g2d,g2g,g2e,ylargev,giterv,giterd,giterg,gitere;
+ local xsigm,xcov,xcov1,giterr,s,asr,assr,errr;
+ local bb,g2s,as1,ass1,ggr,err1,g2r,g4,g5,gitere1,wt;
+ e1 = rows(dta);//Number of observations in the data file
+ wt = dta[.,wtind]; // Weight associated with each observations
+ popass = dta[.,_po];	//column containing the case id
+ p0 = zeros(e1,1); //A column vector of zeros - size: number of the individuals
+ xdel = eqmatdel'*x[nvarm+1:nvarm+rows(eqmatdel)]; //A column vector of deltas - size equal to the number of alternatives, and values equal to teh initial values
+ xgam = eqmatgam'*x[nvarm+rows(eqmatdel)+1:nvarm+rows(eqmatdel)+rows(eqmatgam)];//Same as xdel, applies to gammas
+ xsigm = x[nvarm+rows(eqmatdel)+rows(eqmatgam)+1];
+ v2 = (ones(nc,1) .*. x[1:nvarm])*~(dta[.,ivm])'; //12 by 1000, coefficient mult by variable for each alternative, columns are each individual
+ w2 = (ones(nc,1) .*. xdel)*~(dta[.,ivd])'; //3 by 1000
+ u2 = (ones(nc,1) .*. xgam)*~(dta[.,ivg])'; //3 by 1000
+
+/*Creating the utility equations*/
+/*v, w, u - a column for each alternative, rows are the number of individuals*/
+ j=1;
+ v = {};
+ w = {};
+ u = {};
+ do until j == nc+1;
+   v = v~(sumc(v2[(j-1)*nvarm+1:(j*nvarm),.]));//1000 by 3 vector
+   w = w~(sumc(w2[(j-1)*nvardel+1:(j*nvardel),.])); //1000 by 3 vector
+   u = u~(sumc(u2[(j-1)*nvargam+1:(j*nvargam),.])); //1000 by 3 vector
+   j = j+1;
+ endo;
+
+ clear v2,w2;
+
+ a = exp(w); /* a is (1-Alpha) */
+ if _alp0to1;
+   a = 1/(1+exp(w)); //If alpha is between 0 and 1
+ endif;
+
+ f = exp(u);//f is the gamma
+ b = dta[.,flagchm] .> 0;// dummy of whether a good is consumed or not for 1000 by 3 matrix in this case
+ m = sumc((b'));//A column vector of size 1000, indicates the number of good consumed for each individual
+ c = (a.*b)./((dta[.,flagchm]+f)); //f in paper (1-alpha)/(consumption + gamma), and zero if the good is not consumed
+ c = c./(dta[.,flagprcm]);  // divide f by p
+ c = substute(c,b.==0,1); //substitute c to 1 if b is zero
+ e = (1/c).*b;  //invert c to get p by f, still for each alternative, mutl by b to make zero if any alt is not consumed
+ d = sumc((e')); //Take the sum accross alt, d is a column vector of size number of observations
+ c = (prodc((c'))).*d; //Take the product of f, should have been taken before diving by p
+ v = v-a.*ln((dta[.,flagchm]+f)./f)-ln(dta[.,flagprcm]);//Calculate v, 1000 by 3 matrix
+ ut = v./xsigm;//v by scale
+ uts = -ut./xsigm;//first derivative of ut with respect to xsigma (-v(i)/sigma^2)
+ p1 = exp(ut);//1000 by 3
+ p2 = (p1.*dta[.,flagavm])./sumc((p1.*dta[.,flagavm])');//1000 by 3 matrix - sumc sums everything whatever is available whether consumed or not
+ p3 = substute(p2,b.==0,1);//substitute p2 by 1 if p2 = 0, if not available b will be zero
+ p3 = (prodc((p3'))).*c.*((m-1)!);//column vector of size 1000
+ p3 = p3./((xsigm)^(m-1));//Column vector size 1000, dividing xsigm by each (m-1)
+
+ g1 = (ones(e1,1) .*.eye(nc)) - (p2 .*. ones(nc,1));//1-exp(v)/sum(exp(v) (sum over all alternatives): on the diagonals, for each alternative : for all individuals
+ //g1 size: (1000 + 1000 + 1000) rows and 3 columns
+ g1 = g1.*vecr(b); //g1 size (1000 + 1000 + 1000) rows and 3 columns: If not consumed make those equal to zero
+ g1s = g1.*(uts.*.ones(nc,1));//size (1000 + 1000 + 1000) rows and 3 columns
+ j=1;
+ g2 = {};
+ g2s = {};
+ do until j == e1+1;
+   g2 = g2~(sumc(g1[(j-1)*nc+1:(j*nc),.])); //1000 columns corresponding to each individual, 3 rows corresponding to each alternative
+   g2s = g2s~(sumc(g1s[(j-1)*nc+1:(j*nc),.])); //1000 columns corresponding to each individaul, 3 rows corresponding to each alternative
+   j = j+1;
+ endo;
+ clear g1;
+ h = dta[.,flagchm]+f; //Consumption plus gamma, for each individual for each alternative
+ g2 = (1/xsigm).*(g2').*p3;
+ g2s = (sumc(g2s)-((m-1)/xsigm));// 1000 by 1 matrix, first derivative with respect to sigma
+ if _alp0to1 == 0;
+   g2d = g2.*(((ln(h./f)).*(-a)))+p3.*b+p3.*(e./d).*(-1); 
+   //Derivative with respect to del(i) for particualr individual n, where i corresponds to alternative
+   //1000 by 3 matrix
+ else;
+  g2d = g2.*(((ln(h./f)).*(a.*(1-a))))+p3.*(a-1).*b+p3.*(e./d).*(1-a);
+ endif;
+ g2g = (g2.*(-a).*(1./h).*(-1/f).*dta[.,flagchm]+p3.*(-1./h).*b+p3.*(e./d).*(1./h)).*f; //Derivative with respect to exp(gamma(i))
+ g2v = ones(1,nvarm).*.g2';
+ g2d = ones(1,nvardel).*.g2d';
+ //g2d' is a 3 by 1000 matrix, where 3 is the no. of alt. and 1000 is the no. of ind
+ //Finally g2d is being repeated thrice along the row for same alternative
+ //g2d is a 3 by 3000 : 3 number of alternatives, 3000 ind 1 to 1000 alt1, alt 2, alt 3
+ g2g = ones(1,nvargam).*.g2g';
+ ylargev= dta[.,ivm];//1000 rows corresponding to each individual and 12 columns, four variables for each alternative
+ gv = (reshape((sumc(g2v.*(reshape(ylargev',nc,e1*nvarm))))',nvarm,e1))';
+ gd = (reshape((sumc(g2d.*(reshape(((dta[.,ivd])'),nc,e1*nvardel))))',nvardel,e1))';
+ //dta[.,ivd] is a 1000 by 9 matrix (3 variables each corresponding to 3 alternatives)
+ //Inversing that will give 9 by 1000 matrix
+ //Before final transposing gd is a 3 by 1000 matrix, for each individual sum across all alternatives
+ //For a particular attribue
+ //Transpose it you get the 1000 by 3 matrix, derivative for each individual for a particular attribute accross all alternatives
+ gg = (reshape((sumc(g2g.*(reshape(((dta[.,ivg])'),nc,e1*nvargam))))',nvargam,e1))';
+ //gd and gg are calcualted for each alternative, they are now converted into how many parameters are needed to be estimated
+ retp(wt.*(((gv~gd*eqmatdel'~gg*eqmatgam')./p3)~g2s));
+endp;
+
+
+/* Procedure to obtain actual values of Alphas and Gammas */
+proc lpr1(x,dta);
+ local e1,popass,p0,xdel,xgam,v2,w2,u2,j,v,w,u,a,b,m,c,xsig,ylarge1,ylarge2,fin,as,ass,r,err,ylarge,
+   xsigm,vv,vlos,e,ut,p1,p2,p3,z,w1,z1,d,f,wt;
+ e1 = rows(dta);
+ wt = dta[.,wtind];
+ popass = dta[.,_po];
+ xdel = eqmatdel'*x[nvarm+1:nvarm+rows(eqmatdel)];//converting from number to be estimated to the number of alternatives
+ xgam = eqmatgam'*x[nvarm+rows(eqmatdel)+1:nvarm+rows(eqmatdel)+rows(eqmatgam)];
+ xsigm = x[nvarm+rows(eqmatdel)+rows(eqmatgam)+1];
+ v2 = (ones(nc,1) .*. x[1:nvarm])*~(dta[.,ivm])';//number of parameter * number of alternatives rows, number of column individuals
+ w2 = (ones(nc,1) .*. xdel)*~(dta[.,ivd])';
+ u2 = (ones(nc,1) .*. xgam)*~(dta[.,ivg])';
+
+ j=1;
+ v = {};
+ w = {};
+ u = {};
+ do until j == nc+1;
+   v = v~(sumc(v2[(j-1)*nvarm+1:(j*nvarm),.]));//3 by 1000
+   w = w~(sumc(w2[(j-1)*nvardel+1:(j*nvardel),.]));// 3 by 1000
+   u = u~(sumc(u2[(j-1)*nvargam+1:(j*nvargam),.]));// 3 by 1000
+   j = j+1;
+ endo;
+
+ clear v2,w2;
+
+ a = 1-w;//1-alpha
+ f = u;//gamma
+ b = dta[.,flagchm] .> 0;//consumption dummy
+ m = sumc((b'));//how many consumed by individual
+ c = (a.*b)./((dta[.,flagchm]+f));//f in the paper
+ c = c./(dta[.,flagprcm]); //f by p in paper
+ c = substute(c,b.==0,1);//substitute c by 1 if not consumed
+ e = (1/c).*b;  //p by f
+ d = sumc((e'));//sum of p by f only for the consumed ones
+ c = (prodc((c'))).*d;//p by f into mult(f)
+ v = v-a.*ln((dta[.,flagchm]+f)./f)-ln(dta[.,flagprcm]);//v
+ ut = v./xsigm;
+ p1 = exp(ut);
+ p2 = (p1.*dta[.,flagavm])./sumc((p1.*dta[.,flagavm])');//exp(v/sigma)/sum_over_all_alt(exp(v/sigma): considering availability conditions
+ p3 = substute(p2,b.==0,1);//substitute p2 by 1 if not consumed
+ p3 = (prodc((p3'))).*c.*((m-1)!);
+ p3 = p3./((xsigm)^(m-1));
+ z = p3;
+ w1=zeros(e1,1);
+ if z > w1;
+     z1=ln(z);
+  else;
+  print "yes";
+     z1=ln(z-((z.<=w1).*(z-0.0001)));
+ endif;
+ retp(wt.*z1);
+endp;
+  
