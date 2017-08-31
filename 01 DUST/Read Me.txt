@@ -3,3 +3,10 @@ Model ran using 2009 Disabilities and Use of Time Survey (DUST) dataset - 1452 o
 (1) MDCEV_Final: 			Corss-sectional MDCEV model 	 (GAUSS Code)
 (2) MixedDUSTErrComPanel_13: 		Panel MDCEV final specification  (GAUSS Code) 
 (3) MixedDUSTErrComPanel_13ConstOnly: 	Panel MDCEV constant only model  (GAUSS Code)
+
+An abstract of the research is available in the abstract.docx file.
+
+Please refer to following paper if you use any part of the above codes or use them to come up with your own codes.
+
+Enam, A., Konduri, K. C., Eluru, N., & Ravulaparthy, S. (2015). Relationship Between Well-Being and Daily Time Use of Elderly: Evidence from Disabilities and Use of Time Survey. In Transportation Research Board 94th Annual Meeting (No. 15-3092). 
+(https://trid.trb.org/view.aspx?id=1337922)

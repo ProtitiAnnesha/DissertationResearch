@@ -4,6 +4,8 @@ Data: American Time Use 2013
 (2) 03 Hybrid MDCP With OrdInd Only: 			HMDc code with ordinal indicator, & efficient gradient function				(GAUSS code)
 (3) 03 Hybrid_MDC_Est_1_Ordl1_Test7_Weighted_V3: 	HMDc code with continuous & ordinal indicator, & gradient function is very inefficient	(GAUSS code)
 
-Please refer to following paper if you use any part of the above codes or use them to come up with your own codes
+An abstract of the research is available in the abstract.docx file.
 
-Enam, A., Konduri, K. C., Pinjari, A. R., & Eluru, N. (2017). An integrated choice and latent variable model for multiple discrete continuous choice kernels: Application exploring the association between day level moods and discretionary activity engagement choices. Journal of Choice Modelling.
+Please refer to following paper if you use any part of the above codes or use them to come up with your own codes.
+
+Enam, A., Konduri, K. C., Pinjari, A. R., & Eluru, N. (2017). An integrated choice and latent variable model for multiple discrete continuous choice kernels: Application exploring the association between day level moods and discretionary activity engagement choices. Journal of Choice Modelling. (http://www.sciencedirect.com.ezproxy.lib.uconn.edu/science/article/pii/S1755534517300325)

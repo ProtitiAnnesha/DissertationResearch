@@ -5,3 +5,6 @@ Data used: American Heriatage Time Use Survey 1965, 1985, 2005, 2012
 	(a) PlotParticipationPercentage_6August2017: Participation % for different cohorts by age group
 	(b) DurPlot_Participated_6August2017:	     Activity duration for different cohorst by age group			
 	(c) SocDemCohort6August2017:		     Socio demographics for different cohorts by age group	
+
+An abstract of the research is available in the abstract.docx file.
+

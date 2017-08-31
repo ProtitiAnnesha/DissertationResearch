@@ -4,7 +4,9 @@ Data used: National Household Travel Survey (NHTS) 2009
 
 (2) 03 MDCP estimation code two level_Emperical 05_Merged_11_08_2016: 				Bi-level MDCP code with analytical gradient	(GAUSS CODE)
 
-Please refer to the following paper if you use the above codes in full or in part
+An abstract of the research is available in the abstract.docx file.
 
-Enam, A., and K. Konduri. Continuous Time and Temporally Constrained Tour Pattern Generation System for Jointly Modeling Daily Tours and Stops: Application of Bilevel Multiple Discrete Continuous Probit Model. Transportation Research Record: Journal of the 16 Transportation Research Board, Vol. 6748, No. August 2016, 2017.
+Please refer to the following paper if you use the above codes in full or in part.
 
+Enam, A., & Konduri, K. C. (2017). A Continuous Time and Temporally Constrained Tour Pattern Generation System for Jointly Modeling Daily Tours and Stops: Application of Bi-level Multiple Discrete Continuous Probit (MDCP) Model (No. 17-04697). 
+(https://trid.trb.org/view.aspx?id=1438824)
